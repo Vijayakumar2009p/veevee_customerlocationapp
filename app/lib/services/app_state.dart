@@ -117,6 +117,24 @@ class ActivityDoneInput {
   final List<String> photoPaths;
 }
 
+/// Counts for the Profile tab.
+class WorkStats {
+  const WorkStats({this.customers = 0, this.locations = 0, this.activities = 0, this.visits = 0});
+  final int customers;
+  final int locations;
+  final int activities;
+  final int visits;
+}
+
+/// One line of "My history".
+class HistoryItem {
+  const HistoryItem({required this.at, required this.title, required this.detail, required this.kind});
+  final DateTime at;
+  final String title;
+  final String detail;
+  final String kind;
+}
+
 class UpdateInfo {
   UpdateInfo({required this.latestVersion, required this.apkUrl, this.notes = ''});
   final String latestVersion;
@@ -153,6 +171,16 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   Set<String> partnerFields = {};
   bool hasAddon = false;
   DateTime? lastRefresh;
+  DateTime? lastSyncAt;
+  bool largeText = false;
+
+  // Profile (from Odoo res.users)
+  int? myPartnerId;
+  String companyName = '';
+  String userImage = '';
+
+  /// Activities marked done on this phone (last 7 days), for the Done tab.
+  List<Map<String, dynamic>> doneLog = [];
   Map<String, int> refToId = {};
   int _nextLocalId = -1;
 
@@ -240,6 +268,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       partnerFields = Set<String>.from((s['partnerFields'] ?? const []) as List);
       hasAddon = s['hasAddon'] == true;
       lastRefresh = DateTime.tryParse((s['lastRefresh'] ?? '') as String);
+      lastSyncAt = DateTime.tryParse((s['lastSyncAt'] ?? '') as String);
+      largeText = s['largeText'] == true;
+      myPartnerId = s['myPartnerId'] as int?;
+      companyName = (s['companyName'] ?? '') as String;
+      userImage = (s['userImage'] ?? '') as String;
       refToId = Map<String, int>.from((s['refToId'] ?? const {}) as Map);
       _nextLocalId = (s['nextLocalId'] ?? -1) as int;
     }
@@ -247,6 +280,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (c is List) {
       customers = c.map((e) => Customer.fromJson(Map<String, dynamic>.from(e as Map))).toList();
     }
+    final dl = await store.readJson('doneLog');
+    if (dl is List) doneLog = dl.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     final v = await store.readJson('activities');
     if (v is List) {
       activities = v.map((e) => OdooActivity.fromJson(Map<String, dynamic>.from(e as Map))).toList();
@@ -281,6 +316,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     'partnerFields': partnerFields.toList(),
     'hasAddon': hasAddon,
     'lastRefresh': lastRefresh?.toIso8601String(),
+    'lastSyncAt': lastSyncAt?.toIso8601String(),
+    'largeText': largeText,
+    'myPartnerId': myPartnerId,
+    'companyName': companyName,
+    'userImage': userImage,
     'refToId': refToId,
     'nextLocalId': _nextLocalId,
   });
@@ -389,6 +429,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     needsLogin = false;
     customers = [];
     activities = [];
+    doneLog = [];
+    myPartnerId = null;
+    companyName = '';
+    userImage = '';
+    unawaited(store.writeJson('doneLog', []));
     visitTypeId = null;
     uid = 0;
     queue = [];
@@ -500,6 +545,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       'partner_latitude',
       'partner_longitude',
       'date_localization',
+      'create_date',
+      'create_uid',
     ];
     if (partnerFields.isEmpty) {
       return wanted.where((f) => f != 'mobile' && f != 'date_localization').toList();
@@ -694,6 +741,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       zip: input.zip.trim(),
       stateName: gstState ?? '',
       pending: true,
+      createdAt: DateTime.now().toUtc().toIso8601String(),
+      createdBy: uid == 0 ? null : uid,
     );
     customers.insert(0, customer);
     // Extra contact persons (company or individual): each one is created
@@ -730,6 +779,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           phone: personPhone,
           city: input.city.trim(),
           pending: true,
+          createdAt: DateTime.now().toUtc().toIso8601String(),
+          createdBy: uid == 0 ? null : uid,
         ),
       );
     }
@@ -829,6 +880,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final old = lastRefresh == null || DateTime.now().difference(lastRefresh!) > const Duration(minutes: 10);
     if (!onlyIfOld || old) await refreshCustomers();
     await refreshActivities();
+    if (myPartnerId == null || !onlyIfOld) unawaited(loadProfile());
   }
 
   Future<void>? _syncRun;
@@ -857,6 +909,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         _syncAgain = false;
         reachedServer = await _syncPass();
       } while (_syncAgain && reachedServer && !needsLogin);
+      if (reachedServer) lastSyncAt = DateTime.now();
     } finally {
       syncing = false;
       _applyPendingToCustomers();
@@ -1627,6 +1680,16 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       ),
     );
     activities.remove(v);
+    final cutoff = DateTime.now().subtract(const Duration(days: 7));
+    doneLog
+      ..removeWhere((e) => (DateTime.tryParse((e['doneAt'] ?? '') as String) ?? cutoff).isBefore(cutoff))
+      ..insert(0, {
+        ...v.toJson(),
+        'doneAt': DateTime.now().toIso8601String(),
+        'result': input.result.trim(),
+        'remark': input.remark.trim(),
+      });
+    await store.writeJson('doneLog', doneLog);
     await _saveQueue();
     await _saveActivities();
     notifyListeners();
@@ -1636,6 +1699,18 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       // Saved on the phone; it will be sent later.
     }
     return ref;
+  }
+
+  /// Activities marked done today on this phone, newest first.
+  List<(OdooActivity, DateTime)> get doneToday {
+    final now = DateTime.now();
+    final out = <(OdooActivity, DateTime)>[];
+    for (final e in doneLog) {
+      final at = DateTime.tryParse((e['doneAt'] ?? '') as String);
+      if (at == null || at.year != now.year || at.month != now.month || at.day != now.day) continue;
+      out.add((OdooActivity.fromJson(e), at));
+    }
+    return out;
   }
 
   /// Moves an activity to another date.
@@ -1857,6 +1932,249 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     final remark = (p['remark'] ?? '').toString();
     if (remark.isNotEmpty) parts.add('Note: $remark');
     return parts.join(' ');
+  }
+
+  // ======================================================================
+  // Profile tab: who I am, my work this month, history, phone check
+  // ======================================================================
+
+  Future<void> setLargeText(bool value) async {
+    largeText = value;
+    await _saveSettings();
+    notifyListeners();
+  }
+
+  /// Name, photo and company of the logged-in Odoo user.
+  Future<void> loadProfile() async {
+    if (!loggedIn || needsLogin) return;
+    try {
+      if (uid == 0) await _loadUid();
+      if (uid == 0) return;
+      final rows = await _call(
+        'res.users',
+        'read',
+        [
+          [uid],
+        ],
+        kwargs: {
+          'fields': ['name', 'partner_id', 'company_id', 'image_128'],
+        },
+      );
+      final r = Map<String, dynamic>.from((rows as List).first as Map);
+      final p = r['partner_id'];
+      if (p is List && p.isNotEmpty) myPartnerId = p[0] as int;
+      final c = r['company_id'];
+      companyName = c is List && c.length > 1 ? c[1].toString() : '';
+      userImage = _pictureOrEmpty(r['image_128']);
+      final name = r['name'] is String ? r['name'] as String : '';
+      if (name.isNotEmpty) {
+        odooUserName = name;
+        if (!AppConfig.sharedLogin) userName = name;
+      }
+      await _saveSettings();
+      notifyListeners();
+    } on OdooNetworkException {
+      // Offline: keep what we have.
+    } on OdooException {
+      // Not allowed: keep what we have.
+    }
+  }
+
+  /// Odoo gives users without a photo a generated SVG avatar; the app shows
+  /// its own initial instead.
+  static String _pictureOrEmpty(Object? b64) {
+    if (b64 is! String || b64.isEmpty) return '';
+    try {
+      final head = utf8.decode(
+        base64Decode(b64.substring(0, b64.length.clamp(0, 64))).take(20).toList(),
+        allowMalformed: true,
+      );
+      if (head.contains('<svg') || head.contains('<?xml')) return '';
+    } catch (_) {
+      return '';
+    }
+    return b64;
+  }
+
+  /// Sets the Odoo user's photo (Profile → camera button). Needs internet.
+  Future<void> setProfilePhoto(String path) async {
+    final bytes = await File(path).readAsBytes();
+    await _call('res.users', 'write', [
+      [uid],
+      {'image_1920': base64Encode(bytes)},
+    ]);
+    await loadProfile();
+  }
+
+  static String _odooDateTime(DateTime local) {
+    final u = local.toUtc();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${u.year}-${two(u.month)}-${two(u.day)} ${two(u.hour)}:${two(u.minute)}:${two(u.second)}';
+  }
+
+  Future<int> _count(String model, List<dynamic> domain) async {
+    final n = await _call(model, 'search_count', [domain]);
+    return n is int ? n : 0;
+  }
+
+  Future<WorkStats> _statsBetween(DateTime from, DateTime to) async {
+    final a = _odooDateTime(from);
+    final b = _odooDateTime(to);
+    final pid = myPartnerId ?? 0;
+    final customers = await _count('res.partner', [
+      ...AppConfig.customerDomain,
+      ['create_uid', '=', uid],
+      ['create_date', '>=', a],
+      ['create_date', '<', b],
+    ]);
+    final locations = await _count('mail.message', [
+      ['model', '=', 'res.partner'],
+      ['author_id', '=', pid],
+      ['body', 'ilike', 'Location set on site with VeeVee Field Locator'],
+      ['date', '>=', a],
+      ['date', '<', b],
+    ]);
+    final activitiesDone = await _count('mail.message', [
+      ['author_id', '=', pid],
+      ['mail_activity_type_id', '!=', false],
+      ['date', '>=', a],
+      ['date', '<', b],
+    ]);
+    final visits = visitTypeId == null
+        ? 0
+        : await _count('mail.message', [
+            ['author_id', '=', pid],
+            ['mail_activity_type_id', '=', visitTypeId],
+            ['date', '>=', a],
+            ['date', '<', b],
+          ]);
+    return WorkStats(customers: customers, locations: locations, activities: activitiesDone, visits: visits);
+  }
+
+  /// This month and last month, counted in Odoo (so reinstalling loses nothing).
+  Future<(WorkStats, WorkStats)> loadWorkStats() async {
+    if (myPartnerId == null) await loadProfile();
+    final now = DateTime.now();
+    final thisMonth = DateTime(now.year, now.month);
+    final nextMonth = DateTime(now.year, now.month + 1);
+    final lastMonth = DateTime(now.year, now.month - 1);
+    final current = await _statsBetween(thisMonth, nextMonth);
+    final previous = await _statsBetween(lastMonth, thisMonth);
+    return (current, previous);
+  }
+
+  /// All contacts this user ever created.
+  Future<int> loadMyCustomersCount() => _count('res.partner', [
+    ...AppConfig.customerDomain,
+    ['create_uid', '=', uid],
+  ]);
+
+  /// My latest notes and done activities in Odoo, newest first.
+  Future<List<HistoryItem>> loadHistory({int limit = 30}) async {
+    if (myPartnerId == null) await loadProfile();
+    final rows = await _call(
+      'mail.message',
+      'search_read',
+      [
+        [
+          ['author_id', '=', myPartnerId ?? 0],
+          ['model', '!=', false],
+          [
+            'message_type',
+            'in',
+            ['comment', 'notification'],
+          ],
+        ],
+      ],
+      kwargs: {
+        'fields': ['date', 'body', 'record_name', 'model', 'mail_activity_type_id'],
+        'order': 'date desc, id desc',
+        'limit': limit,
+      },
+    );
+    final out = <HistoryItem>[];
+    for (final m in (rows as List).cast<Map>()) {
+      final text = OdooActivity.htmlToText(m['body']);
+      final type = m['mail_activity_type_id'];
+      final record = m['record_name'] is String ? m['record_name'] as String : '';
+      final at = DateTime.tryParse('${(m['date'] ?? '').toString().replaceFirst(' ', 'T')}Z')?.toLocal();
+      if (at == null) continue;
+      String title;
+      var kind = 'note';
+      if (type is List && type.length > 1) {
+        title = '${type[1]} done';
+        kind = 'activity';
+      } else if (text.startsWith('Location set')) {
+        title = 'Location set';
+        kind = 'location';
+      } else if (text.startsWith('Customer created')) {
+        title = 'Customer added';
+        kind = 'customer';
+      } else if (text.startsWith('Photos added') || text.startsWith('Profile picture')) {
+        title = 'Photos added';
+        kind = 'photo';
+      } else if (text.isEmpty) {
+        continue; // field-change tracking, nothing to show
+      } else {
+        title = 'Note';
+      }
+      final result = RegExp(r'Result: ([^.]+)\.').firstMatch(text)?.group(1);
+      out.add(
+        HistoryItem(at: at, title: title, detail: [record, ?result].where((s) => s.isNotEmpty).join(' · '), kind: kind),
+      );
+    }
+    return out;
+  }
+
+  /// True when Odoo answers with this login.
+  Future<bool> checkServer() async {
+    try {
+      await _call('res.users', 'search_count', [
+        [
+          ['id', '=', uid],
+        ],
+      ]);
+      return true;
+    } on OdooNetworkException {
+      return false;
+    } on OdooException {
+      return false;
+    }
+  }
+
+  /// "Report a problem": a note with the text (and screenshot) on your own
+  /// contact in Odoo, plus a To-Do for the administrator so it is seen.
+  Future<void> reportProblem(String text, {String? screenshotPath}) async {
+    if (myPartnerId == null) await loadProfile();
+    final pid = myPartnerId;
+    if (pid == null) throw OdooException('Could not find your contact in Odoo. Check the internet and try again.');
+    final attachments = <int>[];
+    if (screenshotPath != null) {
+      attachments.add(await _uploadPhoto(screenshotPath, 'Problem screenshot ${formatDate(DateTime.now())}.jpg'));
+    }
+    final body =
+        'Problem reported from VeeVee Field Locator ${AppConfig.appVersion} by $userName '
+        'on ${formatDateTime(DateTime.now())}: ${text.trim()}';
+    await _postNote(pid, body, attachmentIds: attachments);
+    // Tell the administrator (user 2 is the first admin in every Odoo).
+    final todo = activityTypes.where((t) => t.icon == 'fa-check' || t.name == 'To-Do').firstOrNull;
+    try {
+      await _call(
+        'res.partner',
+        'activity_schedule',
+        [
+          [pid],
+        ],
+        kwargs: {
+          'activity_type_id': ?todo?.id,
+          'user_id': 2,
+          'summary': 'Problem reported in the app by $userName',
+          'note': text.trim(),
+        },
+      );
+    } on OdooException {
+      // The note is posted; the reminder for the admin is a bonus.
+    }
   }
 
   // ======================================================================

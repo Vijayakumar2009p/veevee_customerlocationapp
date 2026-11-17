@@ -27,6 +27,42 @@ class VV {
   static const radiusLg = 16.0;
 }
 
+/// WhatsApp-like neutrals used by the tabbed screens.
+class WaColors {
+  WaColors._();
+  static const grey = Color(0xFF54656F);
+  static const background = Color(0xFFF0F2F5);
+  static const divider = Color(0xFFE9EDEF);
+
+  /// Avatar fills (brand colours) with the text colour that reads on each.
+  static const avatars = [
+    (Color(0xFF0261A8), Colors.white),
+    (Color(0xFF349AC4), Color(0xFF0F2A3F)),
+    (Color(0xFFFFB411), Color(0xFF0F2A3F)),
+    (Color(0xFF1A7A4A), Colors.white),
+    (Color(0xFF5B4FB5), Colors.white),
+    (Color(0xFFB3261E), Colors.white),
+  ];
+
+  static (Color, Color) avatarFor(String name) {
+    var h = 0;
+    for (final c in name.codeUnits) {
+      h = (h * 31 + c) & 0x7fffffff;
+    }
+    return avatars[h % avatars.length];
+  }
+
+  static String initials(String name) {
+    final words = name.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    if (words.isEmpty) return '?';
+    final a = words.first.characters.first;
+    final b = words.length > 1
+        ? words[1].characters.first
+        : (words.first.length > 1 ? words.first.characters.elementAt(1) : '');
+    return (a + b).toUpperCase();
+  }
+}
+
 ThemeData buildTheme() {
   final scheme = ColorScheme.fromSeed(
     seedColor: VV.blue,

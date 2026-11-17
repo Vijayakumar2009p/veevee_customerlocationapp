@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'app_scope.dart';
 import 'config.dart';
-import 'screens/home_screen.dart';
+import 'screens/main_shell.dart';
 import 'screens/login_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/your_name_screen.dart';
@@ -65,6 +65,15 @@ class _FieldLocatorAppState extends State<FieldLocatorApp> {
         title: AppConfig.appName,
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
+        // Profile → Display → Large text.
+        builder: (context, child) {
+          if (!state.largeText) return child!;
+          final mq = MediaQuery.of(context);
+          return MediaQuery(
+            data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(1) * 1.18)),
+            child: child!,
+          );
+        },
         home: const RootGate(),
       ),
     );
@@ -80,6 +89,6 @@ class RootGate extends StatelessWidget {
     final app = AppScope.of(context);
     if (!app.loggedIn) return const LoginScreen();
     if (app.userName.isEmpty) return const YourNameScreen();
-    return const HomeScreen();
+    return const MainShell();
   }
 }

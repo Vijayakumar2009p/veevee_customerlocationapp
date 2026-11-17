@@ -84,6 +84,12 @@ The module adds the activity type **Field Visit** (map-pin icon, next to *Docume
 
 Give each field user the **"Field Locator: location only"** group, as in 1.2. Each user needs an Odoo user licence.
 
+### 1.4b App layout (1.3.0)
+
+Three tabs at the bottom: **Contacts · My Activities · Profile**. The ☰ menu on Contacts has Settings, Check for updates, Help & support, About and Log out.
+
+**Profile** shows the Odoo user's photo (camera button changes it in Odoo), name, login, company and database; **My work** this month vs last month (customers added, locations set, activities done, field visits; counted in Odoo); **My customers**; **My history** (latest notes and done activities); **Sync**; **Phone check** (location permission, precise GPS, GPS on, battery saver, Odoo reachable, with "Fix this" buttons); **Large text**; **Report a problem** (note on your contact plus a To-Do for user 2, the main administrator); app version and Log out.
+
 ### 1.5 My Activities (any Odoo, no module needed)
 
 Every activity assigned to the logged-in user in Odoo shows in the app under **My Activities** (home banner and menu): To-Do, Email, Call, Meeting, Document, Field Visit and custom types, on contacts and on other records (quotation, lead, invoice…).

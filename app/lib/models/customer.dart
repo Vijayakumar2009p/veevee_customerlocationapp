@@ -20,6 +20,8 @@ class Customer {
     this.longitude = 0,
     this.locationDate = '',
     this.pending = false,
+    this.createdAt = '',
+    this.createdBy,
   });
 
   /// Odoo id. Negative while the customer exists only on the phone.
@@ -47,6 +49,15 @@ class Customer {
 
   /// True while a change for this customer waits to be synced.
   bool pending;
+
+  /// When and by which Odoo user the contact was created (UTC 'YYYY-MM-DD HH:MM:SS').
+  String createdAt;
+  int? createdBy;
+
+  DateTime? get createdLocal {
+    final d = DateTime.tryParse(createdAt.contains('T') ? createdAt : '${createdAt.replaceFirst(' ', 'T')}Z');
+    return d?.toLocal();
+  }
 
   bool get isLocal => id < 0;
   bool get hasLocation => latitude != 0 || longitude != 0;
@@ -106,6 +117,8 @@ class Customer {
       latitude: _num(r['partner_latitude']),
       longitude: _num(r['partner_longitude']),
       locationDate: _str(r['date_localization']),
+      createdAt: _str(r['create_date']),
+      createdBy: _m2oId(r['create_uid']),
     );
   }
 
@@ -129,6 +142,8 @@ class Customer {
     'longitude': longitude,
     'locationDate': locationDate,
     'pending': pending,
+    'createdAt': createdAt,
+    'createdBy': createdBy,
   };
 
   factory Customer.fromJson(Map<String, dynamic> j) => Customer(
@@ -151,5 +166,7 @@ class Customer {
     longitude: _num(j['longitude']),
     locationDate: (j['locationDate'] ?? '') as String,
     pending: j['pending'] == true,
+    createdAt: (j['createdAt'] ?? '') as String,
+    createdBy: j['createdBy'] as int?,
   );
 }

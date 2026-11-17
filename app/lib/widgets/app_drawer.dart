@@ -3,30 +3,18 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../app_scope.dart';
 import '../config.dart';
-import '../screens/new_customer_screen.dart';
 import '../screens/settings_screen.dart';
-import '../screens/activities_screen.dart';
 import '../theme.dart';
 import '../utils/format.dart';
-import 'common.dart';
 
-/// The ☰ side menu on the customer list.
+/// The ☰ menu on the Contacts tab: Settings, Check for updates,
+/// Help & support, About, Log out.
 class AppDrawer extends StatelessWidget {
-  const AppDrawer({
-    super.key,
-    required this.onShowAll,
-    required this.onShowNoLocation,
-    required this.onShowWaiting,
-    required this.hostContext,
-  });
+  const AppDrawer({super.key, required this.hostContext});
 
   /// The screen behind the menu: used for messages and dialogs after the
   /// menu has closed.
   final BuildContext hostContext;
-
-  final VoidCallback onShowAll;
-  final VoidCallback onShowNoLocation;
-  final VoidCallback onShowWaiting;
 
   @override
   Widget build(BuildContext context) {
@@ -34,222 +22,245 @@ class AppDrawer extends StatelessWidget {
     final nav = Navigator.of(context);
 
     void close() => nav.pop();
-    void open(Widget page) {
-      close();
-      nav.push(MaterialPageRoute(builder: (_) => page));
-    }
 
-    final status = app.needsLogin
-        ? ('Log in again', VV.gold)
+    final (statusText, statusColor) = app.needsLogin
+        ? ('Log in again', VV.danger)
         : app.online
-        ? ('Online', const Color(0xFF7EE2A8))
-        : ('Offline', VV.gold);
+        ? ('Connected${app.lastSyncAt != null ? ' · synced ${formatTime(app.lastSyncAt!)}' : ''}', VV.success)
+        : ('Offline', VV.goldText);
 
     return Drawer(
-      backgroundColor: VV.surface,
-      child: Column(
-        children: [
-          // ---- header: who and where ----
-          Container(
-            width: double.infinity,
-            color: VV.blue,
-            padding: EdgeInsets.fromLTRB(16, MediaQuery.paddingOf(context).top + 16, 16, 16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(VV.radiusMd)),
-                      child: Image.asset('assets/images/logo_mark.png', width: 32, height: 29),
-                    ),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Text(
-                        AppConfig.appName,
-                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  app.userName.isEmpty ? 'Field staff' : app.userName,
-                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Icon(Icons.circle, size: 10, color: status.$2),
-                    const SizedBox(width: 6),
-                    Text(status.$1, style: const TextStyle(color: Colors.white, fontSize: 13)),
-                    if (app.lastRefresh != null)
-                      Text(
-                        '  ·  Updated ${formatTime(app.lastRefresh!)}',
-                        style: const TextStyle(color: Color(0xFFDCEBF7), fontSize: 13),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          // ---- menu ----
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              children: [
-                _item(
-                  Icons.people_alt_outlined,
-                  'All customers',
-                  trailing: formatIndian(app.customers.length),
-                  onTap: () {
-                    close();
-                    onShowAll();
-                  },
-                ),
-                _item(
-                  Icons.location_off_outlined,
-                  'Without location',
-                  trailing: formatIndian(app.withoutLocationCount),
-                  onTap: () {
-                    close();
-                    onShowNoLocation();
-                  },
-                ),
-                _item(
-                  Icons.cloud_upload_outlined,
-                  'Waiting to sync',
-                  trailing: app.waitingCount > 0 ? '${app.waitingCount}' : null,
-                  highlight: app.waitingCount > 0,
-                  onTap: () {
-                    close();
-                    onShowWaiting();
-                  },
-                ),
-                if (app.activitiesEnabled)
-                  _item(
-                    Icons.event_available_outlined,
-                    'My Activities',
-                    trailing: app.activities.isEmpty ? null : '${app.activities.length}',
-                    highlight: app.activitiesDueCount > 0,
-                    onTap: () => open(const ActivitiesScreen()),
-                  ),
-                _item(Icons.person_add_alt_1_outlined, 'New customer', onTap: () => open(const NewCustomerScreen())),
-                _item(
-                  Icons.sync,
-                  'Sync now',
-                  onTap: () async {
-                    close();
-                    await app.refreshAll();
-                    if (hostContext.mounted) {
-                      showMessage(
-                        hostContext,
-                        !app.online
-                            ? 'Still offline. Entries are safe on this phone.'
-                            : app.queue.isEmpty
-                            ? 'All synced. Customer list updated.'
-                            : '${app.queue.length} entries still waiting.',
-                      );
-                    }
-                  },
-                ),
-                const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider()),
-                _item(Icons.settings_outlined, 'Settings', onTap: () => open(const SettingsScreen())),
-                _item(
-                  Icons.system_update_outlined,
-                  'Check for updates',
-                  onTap: () {
-                    close();
-                    checkForUpdatesInteractive(hostContext, app);
-                  },
-                ),
-                _item(
-                  Icons.support_agent_outlined,
-                  'Help & support',
-                  subtitle: 'Call ${AppConfig.supportPhone}',
-                  onTap: () => launchUrl(Uri(scheme: 'tel', path: AppConfig.supportPhone.replaceAll(' ', ''))),
-                ),
-                _item(
-                  Icons.info_outline,
-                  'About',
-                  onTap: () {
-                    close();
-                    showAboutDialog(
-                      context: hostContext,
-                      applicationName: AppConfig.appName,
-                      applicationVersion: 'Version ${AppConfig.appVersion}',
-                      applicationIcon: Image.asset('assets/images/logo_mark.png', width: 40, height: 36),
-                      children: const [
-                        Text(
-                          'Saves the GPS location of customer sites into Odoo '
-                          '(Contacts › Partner Assignment › Geolocation).',
+      backgroundColor: Colors.white,
+      width: 310,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(topRight: Radius.circular(20), bottomRight: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Image.asset('assets/images/logo_lockup.png', width: 170),
+                  const SizedBox(height: 18),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: WaColors.background, borderRadius: BorderRadius.circular(14)),
+                    child: Row(
+                      children: [
+                        CircleAvatar(
+                          radius: 22,
+                          backgroundColor: VV.blue,
+                          child: Text(
+                            WaColors.initials(app.userName.isEmpty ? 'Field staff' : app.userName),
+                            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
+                          ),
                         ),
-                        SizedBox(height: 12),
-                        Text('VeeVee Infotech, Tirupur'),
-                        Text('${AppConfig.supportEmail} | ${AppConfig.supportPhone}'),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                app.userName.isEmpty ? 'Field staff' : app.userName,
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: VV.ink),
+                              ),
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  Icon(Icons.circle, size: 8, color: statusColor),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      statusText,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 13, color: statusColor, fontWeight: FontWeight.w500),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
-                    );
-                  },
-                ),
-                const Padding(padding: EdgeInsets.symmetric(vertical: 8), child: Divider()),
-                _item(
-                  Icons.logout,
-                  'Log out',
-                  color: VV.danger,
-                  onTap: () {
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _item(
+              Icons.settings_outlined,
+              'Settings',
+              VV.blue,
+              VV.blueSoft,
+              onTap: () {
+                close();
+                nav.push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+              },
+            ),
+            _item(
+              Icons.system_update_outlined,
+              'Check for updates',
+              VV.success,
+              VV.successSoft,
+              trailing: AppConfig.appVersion,
+              onTap: () {
+                close();
+                checkForUpdatesInteractive(hostContext, app);
+              },
+            ),
+            _item(
+              Icons.support_agent_outlined,
+              'Help & support',
+              VV.goldText,
+              VV.goldSoft,
+              onTap: () {
+                close();
+                showHelpSheet(hostContext);
+              },
+            ),
+            _item(
+              Icons.info_outline,
+              'About',
+              VV.skyText,
+              VV.skySoft,
+              onTap: () {
+                close();
+                showAboutApp(hostContext);
+              },
+            ),
+            const Spacer(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: VV.danger,
+                    side: const BorderSide(color: Color(0xFFF2C6C2)),
+                    minimumSize: const Size(0, 50),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () {
                     close();
                     confirmLogOut(hostContext, app);
                   },
+                  icon: const Icon(Icons.logout),
+                  label: const Text('Log out', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
                 ),
-              ],
-            ),
-          ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: Text(
-                'Version ${AppConfig.appVersion} · VeeVee Infotech',
-                style: const TextStyle(fontSize: 12, color: VV.inkMuted),
               ),
             ),
-          ),
-        ],
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 16),
+              child: Center(
+                child: Text(
+                  '${AppConfig.appName} · version ${AppConfig.appVersion}',
+                  style: TextStyle(fontSize: 12, color: WaColors.grey),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _item(
-    IconData icon,
-    String label, {
-    required VoidCallback onTap,
-    String? subtitle,
-    String? trailing,
-    bool highlight = false,
-    Color? color,
-  }) {
+  Widget _item(IconData icon, String label, Color fg, Color bg, {required VoidCallback onTap, String? trailing}) {
     return ListTile(
-      leading: Icon(icon, color: color ?? VV.ink),
-      title: Text(
-        label,
-        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15, color: color ?? VV.ink),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 22),
+      minTileHeight: 56,
+      leading: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10)),
+        child: Icon(icon, color: fg, size: 20),
       ),
-      subtitle: subtitle == null ? null : Text(subtitle, style: const TextStyle(color: VV.inkMuted)),
-      trailing: trailing == null
-          ? null
-          : Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: highlight ? VV.gold : VV.surfaceRaised,
-                borderRadius: BorderRadius.circular(VV.radiusSm),
-              ),
-              child: Text(
-                trailing,
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: VV.ink),
-              ),
-            ),
+      title: Text(label, style: const TextStyle(fontSize: 16, color: VV.ink)),
+      trailing: trailing == null ? null : Text(trailing, style: const TextStyle(fontSize: 12, color: WaColors.grey)),
       onTap: onTap,
     );
   }
+}
+
+/// Help & support: call, WhatsApp or email VeeVee.
+void showHelpSheet(BuildContext context) {
+  final phone = AppConfig.supportPhone.replaceAll(' ', '');
+  showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (c) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 4),
+            child: Text('Help & support', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Text('VeeVee Infotech, Tirupur', style: TextStyle(color: WaColors.grey)),
+          ),
+          ListTile(
+            leading: const CircleAvatar(
+              backgroundColor: VV.successSoft,
+              child: Icon(Icons.phone, color: VV.success),
+            ),
+            title: const Text('Call'),
+            subtitle: const Text(AppConfig.supportPhone),
+            onTap: () => launchUrl(Uri(scheme: 'tel', path: phone)),
+          ),
+          ListTile(
+            leading: const CircleAvatar(
+              backgroundColor: VV.successSoft,
+              child: Icon(Icons.chat_outlined, color: VV.success),
+            ),
+            title: const Text('WhatsApp'),
+            subtitle: const Text('Send us a message'),
+            onTap: () => launchUrl(
+              Uri.parse('https://wa.me/${phone.replaceAll('+', '')}'),
+              mode: LaunchMode.externalApplication,
+            ),
+          ),
+          ListTile(
+            leading: const CircleAvatar(
+              backgroundColor: VV.blueSoft,
+              child: Icon(Icons.mail_outline, color: VV.blue),
+            ),
+            title: const Text('Email'),
+            subtitle: const Text(AppConfig.supportEmail),
+            onTap: () => launchUrl(
+              Uri(
+                scheme: 'mailto',
+                path: AppConfig.supportEmail,
+                queryParameters: {'subject': 'VeeVee Field Locator help'},
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    ),
+  );
+}
+
+void showAboutApp(BuildContext context) {
+  showAboutDialog(
+    context: context,
+    applicationName: AppConfig.appName,
+    applicationVersion: 'Version ${AppConfig.appVersion}',
+    applicationIcon: Image.asset('assets/images/logo_mark.png', width: 40),
+    children: const [
+      Text(
+        'Customer locations, new customers and your Odoo activities, '
+        'from the field, with or without internet.',
+      ),
+      SizedBox(height: 12),
+      Text('VeeVee Infotech, Tirupur'),
+      Text('${AppConfig.supportEmail} | ${AppConfig.supportPhone}'),
+    ],
+  );
 }
