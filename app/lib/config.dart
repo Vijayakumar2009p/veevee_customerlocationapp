@@ -5,7 +5,7 @@ class AppConfig {
   static const String appName = 'VeeVee Field Locator';
 
   /// Must match `version:` in pubspec.yaml (the part before `+`).
-  static const String appVersion = '1.1.0';
+  static const String appVersion = '1.2.0';
 
   /// Pre-filled on login page 1. Customer builds set it with
   /// `--dart-define=DEFAULT_SERVER=http://...`.

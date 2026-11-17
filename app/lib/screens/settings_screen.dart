@@ -256,9 +256,11 @@ class _PendingRow extends StatelessWidget {
                               : action.kind == PendingAction.photos
                               ? 'These photos will be removed from this phone.'
                               : action.kind == PendingAction.visitCreate
-                              ? 'This planned field visit will be removed from this phone.'
+                              ? 'This planned activity will be removed from this phone.'
                               : action.kind == PendingAction.visitDone
-                              ? 'The visit will not be marked done; it shows again in Field visits.'
+                              ? 'The activity will not be marked done; it shows again in My Activities.'
+                              : action.kind == PendingAction.activityDate
+                              ? 'The new date will not be sent to Odoo.'
                               : 'This location will be removed from this phone.',
                         ),
                         actions: [

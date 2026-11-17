@@ -7,7 +7,7 @@ import 'package:flutter/widgets.dart';
 
 import '../config.dart';
 import '../models/customer.dart';
-import '../models/field_visit.dart';
+import '../models/activity.dart';
 import '../models/pending_action.dart';
 import '../utils/format.dart';
 import '../utils/validators.dart';
@@ -86,27 +86,33 @@ class LocationInput {
   final String? photoPath;
 }
 
-/// Values from the "Mark visit done" screen.
-class VisitDoneInput {
-  VisitDoneInput({
-    required this.visit,
-    required this.latitude,
-    required this.longitude,
-    required this.accuracy,
-    required this.distanceMeters,
+/// Values from the "Mark done" screens.
+class ActivityDoneInput {
+  ActivityDoneInput({
+    required this.activity,
+    this.latitude,
+    this.longitude,
+    this.accuracy,
+    this.distanceMeters,
     this.farReason = '',
+    this.result = '',
     this.remark = '',
     this.photoPaths = const [],
   });
 
-  final FieldVisit visit;
-  final double latitude;
-  final double longitude;
-  final double accuracy;
+  final OdooActivity activity;
+
+  /// GPS (Field Visit only); null for other types.
+  final double? latitude;
+  final double? longitude;
+  final double? accuracy;
 
   /// Distance from the customer's saved location; null when it has none.
   final double? distanceMeters;
   final String farReason;
+
+  /// Quick result, e.g. "Spoke to customer" (calls).
+  final String result;
   final String remark;
   final List<String> photoPaths;
 }
@@ -140,8 +146,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Odoo id of the "Field Visit" activity type (module 19.0.1.1.0+); null = feature off.
   int? visitTypeId;
-  List<FieldVisit> visits = [];
-  bool refreshingVisits = false;
+  List<OdooActivity> activities = [];
+  List<ActivityType> activityTypes = [];
+  bool refreshingActivities = false;
   Map<String, dynamic> userContext = {};
   Set<String> partnerFields = {};
   bool hasAddon = false;
@@ -224,6 +231,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       odooUserName = (s['odooUserName'] ?? '') as String;
       uid = (s['uid'] ?? 0) as int;
       visitTypeId = s['visitTypeId'] as int?;
+      final types = s['activityTypes'];
+      if (types is List) {
+        activityTypes = types.map((e) => ActivityType.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+      }
       if (!AppConfig.sharedLogin && odooUserName.isNotEmpty) userName = odooUserName;
       userContext = Map<String, dynamic>.from((s['userContext'] ?? const {}) as Map);
       partnerFields = Set<String>.from((s['partnerFields'] ?? const []) as List);
@@ -236,9 +247,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (c is List) {
       customers = c.map((e) => Customer.fromJson(Map<String, dynamic>.from(e as Map))).toList();
     }
-    final v = await store.readJson('visits');
+    final v = await store.readJson('activities');
     if (v is List) {
-      visits = v.map((e) => FieldVisit.fromJson(Map<String, dynamic>.from(e as Map))).toList();
+      activities = v.map((e) => OdooActivity.fromJson(Map<String, dynamic>.from(e as Map))).toList();
     }
     final q = await store.readJson('queue');
     if (q is List) {
@@ -265,6 +276,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     'odooUserName': odooUserName,
     'uid': uid,
     'visitTypeId': visitTypeId,
+    'activityTypes': activityTypes.map((t) => t.toJson()).toList(),
     'userContext': userContext,
     'partnerFields': partnerFields.toList(),
     'hasAddon': hasAddon,
@@ -277,7 +289,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _saveQueue() => store.writeJson('queue', queue.map((a) => a.toJson()).toList());
 
-  Future<void> _saveVisits() => store.writeJson('visits', visits.map((v) => v.toJson()).toList());
+  Future<void> _saveActivities() => store.writeJson('activities', activities.map((v) => v.toJson()).toList());
 
   Future<void> setUserName(String name) async {
     userName = name.trim();
@@ -335,9 +347,9 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
     if (changedServer) {
       customers = [];
-      visits = [];
+      activities = [];
       visitTypeId = null;
-      await _saveVisits();
+      await _saveActivities();
       queue = [];
       refToId = {};
       lastRefresh = null;
@@ -376,7 +388,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     loggedIn = false;
     needsLogin = false;
     customers = [];
-    visits = [];
+    activities = [];
     visitTypeId = null;
     uid = 0;
     queue = [];
@@ -796,8 +808,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   void _startTimer() {
     _timer?.cancel();
+    var ticks = 0;
     _timer = Timer.periodic(AppConfig.autoSyncInterval, (_) {
       if (queue.any((a) => !a.blocked)) syncNow();
+      // New activities from the office show up within about 5 minutes.
+      if (++ticks % 5 == 0 && loggedIn && !needsLogin) refreshActivities();
     });
   }
 
@@ -813,7 +828,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await syncNow();
     final old = lastRefresh == null || DateTime.now().difference(lastRefresh!) > const Duration(minutes: 10);
     if (!onlyIfOld || old) await refreshCustomers();
-    await refreshVisits();
+    await refreshActivities();
   }
 
   Future<void>? _syncRun;
@@ -863,9 +878,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         } else if (action.kind == PendingAction.photos) {
           await _sendPhotos(action);
         } else if (action.kind == PendingAction.visitCreate) {
-          await _sendVisitCreate(action);
+          await _sendActivityCreate(action);
         } else if (action.kind == PendingAction.visitDone) {
-          await _sendVisitDone(action);
+          await _sendActivityDone(action);
+        } else if (action.kind == PendingAction.activityDate) {
+          await _sendActivityDate(action);
         } else {
           await _sendLocation(action);
         }
@@ -913,14 +930,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     if (action.kind == PendingAction.create) {
       customers.removeWhere((c) => c.localRef == action.ref);
       removed.addAll(queue.where((a) => a.partnerRef == action.ref && a.partnerId == null));
-      visits.removeWhere((v) => v.partnerRef == action.ref && v.partnerId == null);
+      activities.removeWhere((v) => v.partnerRef == action.ref && v.partnerId == null);
     }
     if (action.kind == PendingAction.visitCreate) {
-      visits.removeWhere((v) => v.localRef == action.ref);
+      activities.removeWhere((v) => v.localRef == action.ref);
       removed.addAll(queue.where((a) => a.payload['activityRef'] == action.ref && a.payload['activityId'] == null));
     }
     if (action.kind == PendingAction.visitDone) {
-      unawaited(refreshVisits()); // the visit shows again in the list
+      unawaited(refreshActivities()); // the activity shows again in the list
     }
     for (final a in removed) {
       queue.remove(a);
@@ -929,7 +946,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     _applyPendingToCustomers();
     await _saveQueue();
     await _saveCustomers();
-    await _saveVisits();
+    await _saveActivities();
     notifyListeners();
   }
 
@@ -938,7 +955,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
 
   void _linkCreated(PendingAction a, int newId) {
     refToId[a.ref] = newId;
-    for (final v in visits.where((v) => v.partnerRef == a.ref)) {
+    for (final v in activities.where((v) => v.partnerRef == a.ref)) {
       v.partnerId = newId;
     }
     _linkedAt[newId] = DateTime.now();
@@ -1296,44 +1313,65 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   // ======================================================================
-  // Field visits (mail.activity of type "Field Visit", assigned to this user)
+  // My Activities: every mail.activity assigned to this user (To-Do, Email,
+  // Call, Meeting, Document, Field Visit...), on contacts or other records.
   // ======================================================================
 
-  bool get visitsEnabled => visitTypeId != null;
+  /// Field visits need the Odoo module; all other activity types work on any Odoo.
+  bool get activitiesEnabled => loggedIn;
+  bool get fieldVisitsEnabled => visitTypeId != null;
 
-  /// Open visits, earliest first.
-  List<FieldVisit> get openVisits => List.of(visits)..sort((a, b) => a.deadline.compareTo(b.deadline));
+  /// Open activities, earliest first.
+  List<OdooActivity> get openActivities => List.of(activities)..sort((a, b) => a.deadline.compareTo(b.deadline));
 
-  int get visitsDueCount => visits.where((v) => v.daysLeft <= 0).length;
+  int get activitiesDueCount => activities.where((v) => v.daysLeft <= 0).length;
+  int get activitiesOverdueCount => activities.where((v) => v.daysLeft < 0).length;
 
-  List<FieldVisit> visitsFor(Customer c) {
+  List<OdooActivity> activitiesFor(Customer c) {
     final x = resolve(c);
-    return openVisits
+    return openActivities
         .where((v) => (!x.isLocal && v.partnerId == x.id) || (x.localRef != null && v.partnerRef == x.localRef))
         .toList();
   }
 
-  /// Downloads this user's open Field Visits; visits changed on the phone
-  /// (planned or done, not yet sent) are kept as they are on the phone.
-  Future<void> refreshVisits() async {
-    final typeId = visitTypeId;
-    if (typeId == null || !loggedIn || needsLogin || refreshingVisits) return;
-    refreshingVisits = true;
+  /// Activity types staff can plan (contacts), Field Visit first when present.
+  List<ActivityType> get plannableTypes {
+    final list = List.of(activityTypes);
+    list.sort((a, b) => (b.id == visitTypeId ? 1 : 0) - (a.id == visitTypeId ? 1 : 0));
+    return list;
+  }
+
+  /// Downloads this user's open activities; ones changed on the phone (planned,
+  /// done or moved, not yet sent) are kept as they are on the phone.
+  Future<void> refreshActivities() async {
+    if (!loggedIn || needsLogin || refreshingActivities) return;
+    refreshingActivities = true;
     notifyListeners();
     try {
-      if (uid == 0) await _loadUid(); // logged in with an older app version
+      if (uid == 0) await _loadUid();
+      if (uid == 0) return;
+      await _loadActivityTypes();
       final rows = await _call(
         'mail.activity',
         'search_read',
         [
           [
             ['user_id', '=', uid],
-            ['activity_type_id', '=', typeId],
-            ['res_model', '=', 'res.partner'],
           ],
         ],
         kwargs: {
-          'fields': ['res_id', 'res_name', 'summary', 'note', 'date_deadline'],
+          'fields': [
+            'res_model',
+            'res_id',
+            'res_name',
+            'activity_type_id',
+            'activity_category',
+            'icon',
+            'summary',
+            'note',
+            'date_deadline',
+            'create_uid',
+          ],
           'order': 'date_deadline asc, id asc',
           'limit': 500,
         },
@@ -1343,17 +1381,137 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       };
       final fresh = [
         for (final r in (rows as List).cast<Map>())
-          if (!doneIds.contains(r['id'])) FieldVisit.fromOdoo(Map<String, dynamic>.from(r)),
+          if (!doneIds.contains(r['id']))
+            OdooActivity.fromOdoo(Map<String, dynamic>.from(r), fieldVisitTypeId: visitTypeId),
       ];
+      await _fillPartners(fresh);
+      // Dates moved on the phone and not yet sent:
+      for (final a in queue.where((a) => a.kind == PendingAction.activityDate)) {
+        final d = DateTime.tryParse((a.payload['date'] ?? '').toString());
+        for (final v in fresh.where((v) => v.id != null && v.id == a.payload['activityId'])) {
+          if (d != null) v.deadline = d;
+        }
+      }
       // Planned on the phone and not yet sent:
-      final local = visits.where((v) => v.isLocal && queue.any((a) => a.ref == v.localRef)).toList();
-      visits = [...fresh, ...local];
-      await _saveVisits();
+      final local = activities.where((v) => v.isLocal && queue.any((a) => a.ref == v.localRef)).toList();
+      activities = [...fresh, ...local];
+      await _saveActivities();
     } on OdooException {
       // Offline or refused: keep the list we have.
     } finally {
-      refreshingVisits = false;
+      refreshingActivities = false;
       notifyListeners();
+    }
+  }
+
+  Future<void> _loadActivityTypes() async {
+    try {
+      final rows = await _call(
+        'mail.activity.type',
+        'search_read',
+        [
+          [
+            '|',
+            ['res_model', '=', false],
+            ['res_model', '=', 'res.partner'],
+          ],
+        ],
+        kwargs: {
+          'fields': ['name', 'icon', 'category'],
+          'order': 'sequence asc, id asc',
+        },
+      );
+      activityTypes = [
+        for (final r in (rows as List).cast<Map>())
+          ActivityType(
+            id: r['id'] as int,
+            name: (r['name'] ?? '').toString(),
+            icon: r['icon'] is String ? r['icon'] as String : '',
+            category: r['category'] is String ? r['category'] as String : 'default',
+          ),
+      ];
+      await _saveSettings();
+    } on OdooNetworkException {
+      rethrow;
+    } on OdooException {
+      // Keep the types we have.
+    }
+  }
+
+  /// Customer name, phone and email for each activity: the contact itself, or
+  /// the partner of the record (quotation, lead, invoice...).
+  Future<void> _fillPartners(List<OdooActivity> list) async {
+    final byModel = <String, Set<int>>{};
+    for (final v in list) {
+      if (v.resModel != 'res.partner' && v.resId != null) {
+        byModel.putIfAbsent(v.resModel, () => {}).add(v.resId!);
+      }
+    }
+    for (final entry in byModel.entries) {
+      try {
+        final rows = await _call(
+          entry.key,
+          'read',
+          [entry.value.toList()],
+          kwargs: {
+            'fields': ['partner_id'],
+          },
+        );
+        final partnerOf = <int, (int, String)>{};
+        for (final r in (rows as List).cast<Map>()) {
+          final p = r['partner_id'];
+          if (p is List && p.length >= 2) partnerOf[r['id'] as int] = (p[0] as int, p[1].toString());
+        }
+        for (final v in list.where((v) => v.resModel == entry.key)) {
+          final p = partnerOf[v.resId];
+          if (p != null) {
+            v.partnerId = p.$1;
+            v.customerName = p.$2;
+          }
+        }
+      } on OdooNetworkException {
+        rethrow;
+      } on OdooException {
+        // No partner field or no access: show the record name only.
+      }
+    }
+    // Phone and email: from the customers on the phone, else from Odoo.
+    final missing = <int>{};
+    for (final v in list) {
+      final id = v.partnerId;
+      if (id == null) continue;
+      final c = customers.where((c) => c.id == id).firstOrNull;
+      if (c != null) {
+        v.phone = c.phone;
+        v.email = c.email;
+        if (v.customerName.isEmpty) v.customerName = c.name;
+      } else {
+        missing.add(id);
+      }
+    }
+    if (missing.isEmpty) return;
+    try {
+      final rows = await _call(
+        'res.partner',
+        'read',
+        [missing.toList()],
+        kwargs: {
+          'fields': ['name', phoneField, 'phone', 'email'],
+        },
+      );
+      final info = {for (final r in (rows as List).cast<Map>()) r['id'] as int: r};
+      for (final v in list) {
+        final r = info[v.partnerId];
+        if (r == null) continue;
+        String s(Object? x) => x is String ? x : '';
+        v.phone = s(r[phoneField]).isNotEmpty ? s(r[phoneField]) : s(r['phone']);
+        v.email = s(r['email']);
+        if (v.customerName.isEmpty) v.customerName = s(r['name']);
+      }
+    } on OdooNetworkException {
+      rethrow;
+    } on OdooException {
+      // Not allowed to read those contacts: no Call/Email shortcut.
     }
   }
 
@@ -1374,9 +1532,10 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  /// Plans a Field Visit for this user (customer page → Plan field visit).
-  Future<String> scheduleVisit(
+  /// Plans an activity for this user on a customer (any type).
+  Future<String> scheduleActivity(
     Customer customer, {
+    required ActivityType type,
     required String summary,
     required DateTime date,
     String note = '',
@@ -1392,22 +1551,39 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         customerName: c.name,
         partnerId: c.isLocal ? null : c.id,
         partnerRef: c.isLocal ? c.localRef : null,
-        payload: {'summary': summary.trim(), 'note': note.trim(), 'date': odooDate(day), 'userName': userName},
+        payload: {
+          'typeId': type.id,
+          'typeName': type.name,
+          'summary': summary.trim(),
+          'note': note.trim(),
+          'date': odooDate(day),
+          'userName': userName,
+        },
       ),
     );
-    visits.add(
-      FieldVisit(
+    activities.add(
+      OdooActivity(
         localRef: ref,
         partnerId: c.isLocal ? null : c.id,
         partnerRef: c.isLocal ? c.localRef : null,
         customerName: c.name,
+        resId: c.isLocal ? null : c.id,
+        resName: c.name,
+        typeId: type.id,
+        typeName: type.name,
+        icon: type.icon,
+        category: type.category,
+        isFieldVisit: type.id == visitTypeId,
         summary: summary.trim(),
         note: note.trim(),
         deadline: day,
+        assignedBy: odooUserName,
+        phone: c.phone,
+        email: c.email,
       ),
     );
     await _saveQueue();
-    await _saveVisits();
+    await _saveActivities();
     notifyListeners();
     try {
       await syncNow();
@@ -1417,37 +1593,42 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     return ref;
   }
 
-  /// Marks a visit done on site. Returns the queue reference.
-  Future<String> markVisitDone(VisitDoneInput input) async {
+  /// Marks an activity done. Returns the queue reference.
+  Future<String> markActivityDone(ActivityDoneInput input) async {
     final ref = _newRef();
-    final v = input.visit;
+    final v = input.activity;
     final photos = await _keepPhotos(input.photoPaths, ref);
     queue.add(
       PendingAction(
         ref: ref,
         kind: PendingAction.visitDone,
         createdAt: DateTime.now(),
-        customerName: v.customerName,
+        customerName: v.customerName.isNotEmpty ? v.customerName : v.resName,
         partnerId: v.partnerId,
         partnerRef: v.partnerId == null ? v.partnerRef : null,
         payload: {
           'activityId': v.id,
           if (v.id == null) 'activityRef': v.localRef,
-          'summary': v.summary,
-          'lat': input.latitude,
-          'lng': input.longitude,
-          'accuracy': input.accuracy,
+          'summary': v.title,
+          'typeName': v.typeName,
+          'resModel': v.resModel,
+          'resId': v.resId,
+          if (input.latitude != null) 'lat': input.latitude,
+          if (input.longitude != null) 'lng': input.longitude,
+          if (input.accuracy != null) 'accuracy': input.accuracy,
+          if (v.isFieldVisit) 'gps': true,
           'distance': input.distanceMeters,
           'farReason': input.farReason.trim(),
+          'result': input.result.trim(),
           'remark': input.remark.trim(),
           if (photos.isNotEmpty) 'photos': photos,
           'userName': userName,
         },
       ),
     );
-    visits.remove(v);
+    activities.remove(v);
     await _saveQueue();
-    await _saveVisits();
+    await _saveActivities();
     notifyListeners();
     try {
       await syncNow();
@@ -1457,14 +1638,59 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     return ref;
   }
 
-  Future<void> _sendVisitCreate(PendingAction a) async {
+  /// Moves an activity to another date.
+  Future<String> rescheduleActivity(OdooActivity v, DateTime date) async {
+    final day = DateTime(date.year, date.month, date.day);
+    // Planned on the phone and not sent yet: just change the plan.
+    if (v.isLocal) {
+      final plan = queue.where((a) => a.ref == v.localRef).firstOrNull;
+      if (plan != null) {
+        plan.payload['date'] = odooDate(day);
+        v.deadline = day;
+        await _saveQueue();
+        await _saveActivities();
+        notifyListeners();
+        return plan.ref;
+      }
+    }
+    final ref = _newRef();
+    queue.removeWhere((a) => a.kind == PendingAction.activityDate && a.payload['activityId'] == v.id && v.id != null);
+    queue.add(
+      PendingAction(
+        ref: ref,
+        kind: PendingAction.activityDate,
+        createdAt: DateTime.now(),
+        customerName: v.customerName.isNotEmpty ? v.customerName : v.resName,
+        partnerId: v.partnerId,
+        payload: {
+          'activityId': v.id,
+          if (v.id == null) 'activityRef': v.localRef,
+          'date': odooDate(day),
+          'summary': v.title,
+          'userName': userName,
+        },
+      ),
+    );
+    v.deadline = day;
+    await _saveQueue();
+    await _saveActivities();
+    notifyListeners();
+    try {
+      await syncNow();
+    } catch (_) {
+      // Saved on the phone; it will be sent later.
+    }
+    return ref;
+  }
+
+  Future<void> _sendActivityCreate(PendingAction a) async {
     final partnerId = a.partnerId ?? (a.partnerRef != null ? refToId[a.partnerRef] : null);
     if (partnerId == null) throw _WaitForCreate();
     a.partnerId = partnerId;
-    final typeId = visitTypeId;
     if (uid == 0) await _loadUid();
+    final typeId = (a.payload['typeId'] as int?) ?? visitTypeId;
     if (typeId == null) {
-      throw OdooException('Field visits need the VeeVee Field Locator module (19.0.1.1.0 or newer) in Odoo.');
+      throw OdooException('This activity type is not available in Odoo any more. Delete this entry and plan it again.');
     }
     final summary = (a.payload['summary'] ?? '').toString();
     final date = (a.payload['date'] ?? '').toString();
@@ -1512,20 +1738,21 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       id = created is List ? created.first as int : created as int;
     }
     refToId[a.ref] = id;
-    for (final v in visits.where((v) => v.localRef == a.ref)) {
+    for (final v in activities.where((v) => v.localRef == a.ref)) {
       v.id = id;
       v.localRef = null;
       v.partnerId = partnerId;
+      v.resId = partnerId;
     }
     for (final other in queue.where((x) => x.payload['activityRef'] == a.ref)) {
       other.payload['activityId'] = id;
       other.partnerId ??= partnerId;
     }
-    await _saveVisits();
+    await _saveActivities();
     await _saveSettings();
   }
 
-  Future<void> _sendVisitDone(PendingAction a) async {
+  int? _activityIdOf(PendingAction a) {
     var activityId = a.payload['activityId'] as int?;
     if (activityId == null) {
       final r = a.payload['activityRef'] as String?;
@@ -1533,6 +1760,28 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       if (activityId == null) throw _WaitForCreate();
       a.payload['activityId'] = activityId;
     }
+    return activityId;
+  }
+
+  static bool _isGone(OdooException e) =>
+      e.message.contains('does not exist') || e.message.contains('has been deleted') || e.message.contains('Missing');
+
+  Future<void> _sendActivityDate(PendingAction a) async {
+    final activityId = _activityIdOf(a);
+    try {
+      await _call('mail.activity', 'write', [
+        [activityId],
+        {'date_deadline': (a.payload['date'] ?? '').toString()},
+      ]);
+    } on OdooNetworkException {
+      rethrow;
+    } on OdooException catch (e) {
+      if (!_isGone(e)) rethrow; // done or deleted in Odoo meanwhile: nothing to move
+    }
+  }
+
+  Future<void> _sendActivityDone(PendingAction a) async {
+    final activityId = _activityIdOf(a);
     final partnerId = a.partnerId ?? (a.partnerRef != null ? refToId[a.partnerRef] : null);
     if (a.payload['sent'] == true) {
       // Done already if the activity is archived (Odoo keeps done activities archived).
@@ -1551,8 +1800,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       );
       if (done is int && done > 0) return;
     }
-    final attachments = await _uploadPhotos(a, 'Field visit photo');
-    final feedback = _visitFeedback(a);
+    final attachments = await _uploadPhotos(a, a.payload['gps'] == true ? 'Field visit photo' : 'Activity photo');
+    final feedback = _doneFeedback(a);
     a.payload['sent'] = true;
     await _saveQueue();
     try {
@@ -1567,38 +1816,46 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     } on OdooNetworkException {
       rethrow;
     } on OdooException catch (e) {
-      // The office deleted the activity meanwhile: keep the visit as a note.
-      final gone = e.message.contains('does not exist') || e.message.contains('has been deleted');
-      if (!gone || partnerId == null) rethrow;
+      // The office deleted the activity meanwhile: keep the work as a note.
+      if (!_isGone(e) || partnerId == null) rethrow;
       final summary = (a.payload['summary'] ?? '').toString();
       await _postNote(
         partnerId,
-        'Field visit done${summary.isNotEmpty ? ': $summary' : ''}. $feedback',
+        '${(a.payload['typeName'] ?? 'Activity').toString()} done${summary.isNotEmpty ? ': $summary' : ''}. $feedback',
         attachmentIds: attachments,
       );
     }
   }
 
-  String _visitFeedback(PendingAction a) {
+  String _doneFeedback(PendingAction a) {
     final p = a.payload;
-    final lat = (p['lat'] as num?)?.toDouble();
-    final lng = (p['lng'] as num?)?.toDouble();
-    final distance = (p['distance'] as num?)?.toDouble();
-    final parts = <String>['Done on site by ${_by(a)} on ${formatDateTime(a.createdAt)}.'];
-    if (distance != null) {
-      parts.add('${formatMeters(distance)} from the customer\'s saved location.');
+    final parts = <String>[];
+    if (p['gps'] == true) {
+      final lat = (p['lat'] as num?)?.toDouble();
+      final lng = (p['lng'] as num?)?.toDouble();
+      final distance = (p['distance'] as num?)?.toDouble();
+      parts.add('Done on site by ${_by(a)} on ${formatDateTime(a.createdAt)}.');
+      if (lat == null || lng == null) {
+        parts.add('No GPS location.');
+      } else {
+        parts.add(
+          distance != null
+              ? '${formatMeters(distance)} from the customer\'s saved location.'
+              : 'Customer has no saved location.',
+        );
+        parts.add(
+          'Lat ${lat.toStringAsFixed(6)}, Long ${lng.toStringAsFixed(6)} (GPS ±${(p['accuracy'] as num? ?? 0).round()} m).',
+        );
+      }
+      final reason = (p['farReason'] ?? '').toString();
+      if (reason.isNotEmpty) parts.add('Far from the customer: $reason.');
     } else {
-      parts.add('Customer has no saved location.');
+      parts.add('Done by ${_by(a)} on ${formatDateTime(a.createdAt)} (VeeVee Field Locator).');
     }
-    if (lat != null && lng != null) {
-      parts.add(
-        'Lat ${lat.toStringAsFixed(6)}, Long ${lng.toStringAsFixed(6)} (GPS ±${(p['accuracy'] as num? ?? 0).round()} m).',
-      );
-    }
-    final reason = (p['farReason'] ?? '').toString();
-    if (reason.isNotEmpty) parts.add('Far from the customer: $reason.');
+    final result = (p['result'] ?? '').toString();
+    if (result.isNotEmpty) parts.add('Result: $result.');
     final remark = (p['remark'] ?? '').toString();
-    if (remark.isNotEmpty) parts.add('Remark: $remark');
+    if (remark.isNotEmpty) parts.add('Note: $remark');
     return parts.join(' ');
   }
 
@@ -1622,13 +1879,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       if (newType != visitTypeId) {
         visitTypeId = newType;
         await _saveSettings();
-        if (newType == null) {
-          visits = [];
-          await _saveVisits();
-        }
       }
       notifyListeners();
-      if (visitTypeId != null) unawaited(refreshVisits());
       return info;
     } catch (_) {
       return null;

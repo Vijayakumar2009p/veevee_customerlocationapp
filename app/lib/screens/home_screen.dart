@@ -13,7 +13,7 @@ import 'customer_screen.dart';
 import 'login_screen.dart';
 import 'new_customer_screen.dart';
 import 'settings_screen.dart';
-import 'visits_screen.dart';
+import 'activities_screen.dart';
 
 enum _Filter { all, noLocation, waiting }
 
@@ -164,7 +164,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 tone: Tone.danger,
                 onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen())),
               ),
-            const VisitsBanner(),
+            const ActivitiesBanner(),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: Column(

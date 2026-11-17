@@ -84,6 +84,20 @@ The module adds the activity type **Field Visit** (map-pin icon, next to *Docume
 
 Give each field user the **"Field Locator: location only"** group, as in 1.2. Each user needs an Odoo user licence.
 
+### 1.5 My Activities (any Odoo, no module needed)
+
+Every activity assigned to the logged-in user in Odoo shows in the app under **My Activities** (home banner and menu): To-Do, Email, Call, Meeting, Document, Field Visit and custom types, on contacts and on other records (quotation, lead, invoice…).
+
+| Type | Main button in the app |
+|---|---|
+| Call | **Call** (dialler), then "Call finished?" with a quick result (Spoke to customer / No answer / Call back later) |
+| Email | **Email** (mail app), then Mark done |
+| Meeting, To-Do, others | **Mark done** with an optional note and photos |
+| Document | **Upload**: photo of the document, attached to the done message |
+| Field Visit | **Mark done** with GPS distance check (module needed for this type) |
+
+Each activity also has **Reschedule** (Tomorrow / Next week / pick a date). *Mark done* can **plan the next activity** straight away. From a customer page, **Plan activity** creates any type for yourself. Everything works offline and is sent to Odoo later. In Odoo the activity is marked done the normal way, with the note in the chatter.
+
 ## 2. Before building: set your server
 
 Edit `app/lib/config.dart`:

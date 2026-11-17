@@ -8,8 +8,8 @@ import '../theme.dart';
 import '../utils/format.dart';
 import '../widgets/common.dart';
 import 'add_photos_screen.dart';
-import 'plan_visit_screen.dart';
-import 'visits_screen.dart';
+import 'activities_screen.dart';
+import 'plan_activity_screen.dart';
 import 'set_location_screen.dart';
 
 /// Customer details. The app only sets the location here; other details
@@ -104,17 +104,18 @@ class CustomerScreen extends StatelessWidget {
                     icon: const Icon(Icons.add_a_photo_outlined),
                     label: const Text('Add photos', style: TextStyle(fontSize: 16)),
                   ),
-                  if (app.visitsEnabled) ...[
+                  if (app.activitiesEnabled) ...[
                     const SizedBox(height: 24),
-                    const SectionLabel('Field visits'),
-                    for (final v in app.visitsFor(c)) VisitTile(visit: v, showCustomer: false),
+                    const SectionLabel('Activities'),
+                    for (final v in app.activitiesFor(c)) ActivityCard(activity: v, showCustomer: false),
                     const SizedBox(height: 8),
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 52)),
-                      onPressed: () =>
-                          Navigator.of(context).push(MaterialPageRoute(builder: (_) => PlanVisitScreen(customer: c))),
+                      onPressed: () => Navigator.of(
+                        context,
+                      ).push(MaterialPageRoute(builder: (_) => PlanActivityScreen(customer: c))),
                       icon: const Icon(Icons.event_available_outlined),
-                      label: const Text('Plan field visit', style: TextStyle(fontSize: 16)),
+                      label: const Text('Plan activity', style: TextStyle(fontSize: 16)),
                     ),
                   ],
                 ],

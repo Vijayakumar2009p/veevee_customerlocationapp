@@ -7,20 +7,20 @@ import 'package:geolocator/geolocator.dart';
 import '../app_scope.dart';
 import '../config.dart';
 import '../models/customer.dart';
-import '../models/field_visit.dart';
+import '../models/activity.dart';
 import '../services/app_state.dart';
 import '../services/location_service.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import '../widgets/common.dart';
 import '../widgets/photo_strip.dart';
-import 'visits_screen.dart';
+import 'activities_screen.dart';
 
 /// Marks a Field Visit done on site: GPS position and distance from the
 /// customer's saved location (warning only), remark, optional photos.
 class VisitDoneScreen extends StatefulWidget {
   const VisitDoneScreen({super.key, required this.visit, this.customer});
-  final FieldVisit visit;
+  final OdooActivity visit;
   final Customer? customer;
 
   @override
@@ -176,12 +176,12 @@ class _VisitDoneScreenState extends State<VisitDoneScreen> {
           ),
         );
       }
-      final ref = await app.markVisitDone(
-        VisitDoneInput(
-          visit: widget.visit,
-          latitude: fix?.latitude ?? 0,
-          longitude: fix?.longitude ?? 0,
-          accuracy: fix?.accuracy ?? 0,
+      final ref = await app.markActivityDone(
+        ActivityDoneInput(
+          activity: widget.visit,
+          latitude: fix?.latitude,
+          longitude: fix?.longitude,
+          accuracy: fix?.accuracy,
           distanceMeters: fix == null ? null : distance,
           farReason: farReason,
           remark: _remark.text,
@@ -190,8 +190,8 @@ class _VisitDoneScreenState extends State<VisitDoneScreen> {
       );
       if (!mounted) return;
       HapticFeedback.mediumImpact();
-      showVisitResult(context, 'Field visit marked done.', ref);
-      Navigator.of(context).pop();
+      showActivityResult(context, 'Field visit marked done.', ref);
+      Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) showMessage(context, 'Could not save: $e', error: true);
     } finally {
@@ -215,7 +215,7 @@ class _VisitDoneScreenState extends State<VisitDoneScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
                 children: [
-                  Text(v.customerName, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+                  Text(v.relatedLine, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
                   const SizedBox(height: 2),
                   Text(v.title, style: const TextStyle(fontSize: 16, color: VV.ink)),
                   if (v.note.isNotEmpty) ...[
