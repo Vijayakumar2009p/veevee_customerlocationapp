@@ -122,7 +122,6 @@ class SettingsScreen extends StatelessWidget {
             ('Database', app.database),
             ('Odoo login', app.odooUserName.isNotEmpty ? '${app.odooUserName} (${app.login})' : app.login),
             ('Status', app.needsLogin ? 'Log in again' : (app.online ? 'Online' : 'Offline')),
-            ('Odoo module', app.hasAddon ? 'Installed' : 'Not installed'),
             ('App version', AppConfig.appVersion),
           ]),
           const SizedBox(height: 16),
@@ -161,8 +160,12 @@ Future<void> checkForUpdatesInteractive(BuildContext context, AppState app) => _
 Future<void> confirmLogOut(BuildContext context, AppState app) => _logOut(context, app);
 
 Future<void> _checkUpdate(BuildContext context, AppState app) async {
-  if (!app.hasAddon) {
-    showMessage(context, 'Update check needs the VeeVee Field Locator module in Odoo.');
+  if (AppConfig.updateInfoUrl.isEmpty) {
+    showMessage(
+      context,
+      'This phone has version ${AppConfig.appVersion}. New versions are sent to you directly '
+      '(${AppConfig.supportPhone}).',
+    );
     return;
   }
   final info = await app.checkForUpdate();

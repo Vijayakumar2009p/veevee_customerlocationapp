@@ -5,7 +5,6 @@ An Android app for VeeVee Infotech field staff. At a customer's site, the staff 
 | Folder | What it is |
 |---|---|
 | `app/` | Flutter source of the Android app (`VeeVee Field Locator`, package `com.veeveeinfotech.fieldlocator`) |
-| `odoo_addon/veevee_field_locator/` | Odoo 19 module: hides the geolocation *Refresh* button, keeps GPS pins safe, restricts the shared login, offers app updates |
 | `.github/workflows/build-apk.yml` | Optional: build the APK on GitHub instead of your PC |
 
 Applies to: **Odoo 19** (Enterprise or Community: the geolocation fields come from the free `base_geolocalize` module) and **Android 8.0+**.
@@ -14,9 +13,7 @@ Applies to: **Odoo 19** (Enterprise or Community: the geolocation fields come fr
 
 ## 0. Test first with Odoo on your own PC
 
-1. Start your local Odoo 19 with the module folder in the addons path and listening on the network:
-   `./odoo-bin -c odoo.conf --addons-path=...,/path/to/odoo_addon --http-interface=0.0.0.0`
-   then install **VeeVee Field Locator** and create the field user (section 1).
+1. Start your local Odoo 19 listening on the network (`--http-interface=0.0.0.0`), install **Partners Geolocation** and create the field user (section 1).
 2. Find the PC's address: `hostname -I` (e.g. `192.168.1.10`). Allow the port: `sudo ufw allow 8069/tcp`.
 3. On the phone (same Wi-Fi), open `http://192.168.1.10:8069` in Chrome to be sure it loads.
 4. Build a **debug** APK (`flutter build apk --debug`) or run over USB (`flutter run`). Only the TEST (debug) build allows `http://`; the RELEASE build needs `https://`.
@@ -26,18 +23,12 @@ Applies to: **Odoo 19** (Enterprise or Community: the geolocation fields come fr
 
 ## 1. Odoo setup
 
-### 1.1 Install the module (on-premise or Odoo.sh)
+### 1.1 Odoo apps needed
 
-1. Copy `odoo_addon/veevee_field_locator` into your custom addons folder (on Odoo.sh: push it to your repository).
-2. Restart Odoo, turn on developer mode, then **Apps → Update Apps List**.
-3. Search **VeeVee Field Locator** and click **Activate**.
+No custom Odoo module is needed: the app works with standard Odoo 19 (Enterprise or Community, on-premise, Odoo.sh or Odoo Online).
 
-The module is optional. The app works without it, but then:
-- the *Refresh* button stays visible (a click replaces the GPS pin with an address estimate),
-- editing a contact's address in Odoo resets its pin to 0 (standard Odoo behaviour),
-- the shared login is not restricted, and the update notice is off.
-
-On **Odoo Online** (`*.odoo.com`) custom modules cannot be installed. The app still saves locations there.
+- Install **Partners Geolocation** (`base_geolocalize`, free): **Apps** → remove the *Apps* filter → search *geolocation* → **Activate**. It adds *Contacts → Partner Assignment → Geolocation* (Latitude, Longitude), where the app saves locations.
+- Tell office users: do **not** click *Refresh / Compute based on address* on that tab (it replaces the GPS pin with an address estimate), and after editing a customer's address in Odoo, set the location again from the app (standard Odoo resets the pin to 0 when the address changes).
 
 ### 1.2 Create the field login(s)
 
@@ -51,10 +42,6 @@ On **Odoo Online** (`*.odoo.com`) custom modules cannot be installed. The app st
 | Contacts | **Creation** |
 | Password | set one, e.g. `[PASSWORD]` (share it only with the field staff) |
 
-Then (developer mode) **Settings → Users & Companies → Groups → "Field Locator: location only" → Users → Add** the Field Team user.
-
-With this group the login **can** set locations and addresses, and create customers with basic details. It **cannot** change other details (name, GSTIN, email, salesperson…) or delete contacts. Odoo shows a clear message if someone tries.
-
 Do **not** switch on two-factor authentication for this login; the app cannot use it.
 
 ### 1.3 What the app writes in Odoo
@@ -63,26 +50,25 @@ Do **not** switch on two-factor authentication for this login; the app cannot us
 |---|---|
 | `partner_latitude`, `partner_longitude` | GPS position of the pin, 7 decimals |
 | `date_localization` | date captured |
-| `vv_gps_captured`, `vv_gps_accuracy`, `vv_gps_by` | (module, stored but not shown) GPS capture, accuracy, person |
 | `image_1920` | profile picture, from the photo starred in the app |
 | Chatter (log note) | "Location set on site with VeeVee Field Locator by Ravi on 05-11-2026, 10:42. Lat …, Long …. GPS accuracy 8 m." |
 
-New customers are created with: name, company/individual, phone, email, GSTIN (companies only), address and (for individuals) the company they work at. **Add contact** (under Mobile) adds any number of contact persons with name and mobile; each is created in Odoo as a contact under the new customer (company or individual). Up to 5 optional photos (camera or gallery) are attached to the "Customer created…" log note in the contact's chatter; the starred one (the first by default) becomes the contact's profile picture and is not repeated in the log note. On an existing customer, **Add photos** does the same (profile picture only if switched on). The profile picture needs module version 19.0.1.0.2 or newer.
+New customers are created with: name, company/individual, phone, email, GSTIN (companies only), address and (for individuals) the company they work at. **Add contact** (under Mobile) adds any number of contact persons with name and mobile; each is created in Odoo as a contact under the new customer (company or individual). Up to 5 optional photos (camera or gallery) are attached to the "Customer created…" log note in the contact's chatter; the starred one (the first by default) becomes the contact's profile picture and is not repeated in the log note. On an existing customer, **Add photos** does the same (profile picture only if switched on).
 
 Note: Odoo 19 has no separate *Mobile* field on contacts, so the mobile number is saved in **Phone**. If a module adds a `mobile` field, the app uses it automatically.
 
 ---
 
-### 1.4 Field visits (module 19.0.1.1.0 or newer)
+### 1.4 Field visits
 
-The module adds the activity type **Field Visit** (map-pin icon, next to *Document* in *Schedule Activity* on contacts).
+Create the activity type once in each Odoo: **Settings → Technical → Activity Types → New** (developer mode), **Name** `Field Visit`, **Icon** `fa-map-marker`, Model *Contact* or empty, Sequence `26`. The app recognises it by the map-pin icon.
 
 - **Office:** open a contact → *Activities* → **Field Visit**, write the job in *Summary* (e.g. "Calendar distribution 2027"), set the date and **Assigned to** = the staff member. For many customers at once: select them in the Contacts list → ⚙ *Actions* → *Schedule Activity*.
 - **App:** each staff member logs in with **their own Odoo login** and sees only the visits assigned to them (*Field visits* in the menu and a banner on the home screen; *Overdue / Today / Upcoming*). Staff can also plan a visit from a customer page (*Plan field visit*).
 - **Mark done:** the app takes the GPS position and shows the distance from the customer's saved location. Farther than 300 m only **warns** and asks for a reason. Remark and photos are optional. If the customer has no location yet, the app offers to save this place as its location.
 - **In Odoo** the activity is marked done with a note like: *"Done on site by Ravi on 16-11-2026, 16:00. 40 m from the customer's saved location. Lat …, Long … (GPS ±6 m). Remark: Gave 2 calendars"*, with the photos attached.
 
-Give each field user the **"Field Locator: location only"** group, as in 1.2. Each user needs an Odoo user licence.
+Each field user needs their own Odoo login (one user licence each).
 
 ### 1.4b App layout (1.3.0)
 
@@ -100,7 +86,7 @@ Every activity assigned to the logged-in user in Odoo shows in the app under **M
 | Email | **Email** (mail app), then Mark done |
 | Meeting, To-Do, others | **Mark done** with an optional note and photos |
 | Document | **Upload**: photo of the document, attached to the done message |
-| Field Visit | **Mark done** with GPS distance check (module needed for this type) |
+| Field Visit | **Mark done** with GPS distance check, plus **Set / Update location** |
 
 Each activity also has **Reschedule** (Tomorrow / Next week / pick a date). *Mark done* can **plan the next activity** straight away. From a customer page, **Plan activity** creates any type for yourself. Everything works offline and is sent to Odoo later. In Odoo the activity is marked done the normal way, with the note in the chatter.
 
@@ -214,12 +200,7 @@ The APK appears under the run's *Artifacts* as `field-locator-<customer>-<versio
 
 1. Raise the version in **both** `app/pubspec.yaml` (`version: 1.1.0+2`) and `app/lib/config.dart` (`appVersion = '1.1.0'`).
 2. Build with the same signing key and upload the APK somewhere staff can download it (for example your website).
-3. In Odoo (developer mode) **Settings → Technical → System Parameters**:
-   - `veevee_field_locator.latest_version` = `1.1.0`
-   - `veevee_field_locator.apk_url` = the download link
-   - `veevee_field_locator.release_notes` = optional one line
-
-Phones show "New version available" after their next login or app start.
+3. Send the APK to staff (WhatsApp, Drive). Optional: build with `--dart-define=UPDATE_URL=https://your-site/latest.json`, a small file like `{"latest_version": "1.4.1", "apk_url": "https://your-site/field-locator.apk"}`; phones then show "New version available".
 
 ---
 
@@ -248,8 +229,6 @@ Phones show "New version available" after their next login or app start.
 - [ ] New customer with an existing mobile → duplicate warning
 - [ ] Wrong GSTIN → error; valid GSTIN → state shown
 - [ ] Airplane mode → save a location → "Saved on this phone" → turn network on → entry syncs
-- [ ] In Odoo as the field login: the *Refresh* button is not visible; editing email is refused
-- [ ] In Odoo as admin: edit the street of a GPS-pinned contact → Lat/Long stay
 
 ---
 

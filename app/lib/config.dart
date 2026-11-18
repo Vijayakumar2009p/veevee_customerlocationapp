@@ -5,7 +5,7 @@ class AppConfig {
   static const String appName = 'VeeVee Field Locator';
 
   /// Must match `version:` in pubspec.yaml (the part before `+`).
-  static const String appVersion = '1.3.2';
+  static const String appVersion = '1.4.0';
 
   /// Pre-filled on login page 1. Customer builds set it with
   /// `--dart-define=DEFAULT_SERVER=http://...`.
@@ -64,6 +64,12 @@ class AppConfig {
   /// Field visit "Mark done": warn when farther than this from the
   /// customer's saved location (warning only, never blocks).
   static const double visitFarMeters = 300;
+
+  /// Optional: address of a small JSON file announcing the newest APK, e.g.
+  /// {"latest_version": "1.4.1", "apk_url": "https://…/field-locator.apk"}.
+  /// Set at build time with `--dart-define=UPDATE_URL=https://…/latest.json`.
+  /// Empty: "Check for updates" only shows this phone's version.
+  static const String updateInfoUrl = String.fromEnvironment('UPDATE_URL');
 
   static const String supportPhone = '+91 99657 82269';
   static const String supportEmail = 'info@veeveeinfotech.com';

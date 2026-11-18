@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<odoo>
-    <record id="group_location_only" model="res.groups">
-        <field name="name">Field Locator: location only</field>
-        <field name="comment">For the shared VeeVee Field Locator login. Members can set GPS locations and addresses on contacts and create contacts with basic details, but cannot change other contact details or delete contacts.</field>
-    </record>
-</odoo>

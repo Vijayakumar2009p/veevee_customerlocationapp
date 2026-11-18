@@ -162,14 +162,13 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   String odooUserName = '';
   int uid = 0;
 
-  /// Odoo id of the "Field Visit" activity type (module 19.0.1.1.0+); null = feature off.
+  /// Odoo id of the "Field Visit" activity type (map-pin icon); null = none in this Odoo.
   int? visitTypeId;
   List<OdooActivity> activities = [];
   List<ActivityType> activityTypes = [];
   bool refreshingActivities = false;
   Map<String, dynamic> userContext = {};
   Set<String> partnerFields = {};
-  bool hasAddon = false;
   DateTime? lastRefresh;
   DateTime? lastSyncAt;
 
@@ -265,7 +264,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       if (!AppConfig.sharedLogin && odooUserName.isNotEmpty) userName = odooUserName;
       userContext = Map<String, dynamic>.from((s['userContext'] ?? const {}) as Map);
       partnerFields = Set<String>.from((s['partnerFields'] ?? const []) as List);
-      hasAddon = s['hasAddon'] == true;
       lastRefresh = DateTime.tryParse((s['lastRefresh'] ?? '') as String);
       lastSyncAt = DateTime.tryParse((s['lastSyncAt'] ?? '') as String);
       myPartnerId = s['myPartnerId'] as int?;
@@ -312,7 +310,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     'activityTypes': activityTypes.map((t) => t.toJson()).toList(),
     'userContext': userContext,
     'partnerFields': partnerFields.toList(),
-    'hasAddon': hasAddon,
     'lastRefresh': lastRefresh?.toIso8601String(),
     'lastSyncAt': lastSyncAt?.toIso8601String(),
     'myPartnerId': myPartnerId,
@@ -458,7 +455,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       },
     );
     if (fields is Map) partnerFields = fields.keys.map((k) => k.toString()).toSet();
-    hasAddon = partnerFields.contains('vv_gps_captured');
   }
 
   /// Calls Odoo; logs in again by itself when the session has ended.
@@ -1158,7 +1154,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
         } on OdooNetworkException {
           rethrow;
         } on OdooException {
-          // Refused (e.g. the Odoo module is older): keep the photos in the note.
+          // Refused by Odoo (no rights): keep the photos in the note.
         }
       }
     }
@@ -1259,9 +1255,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       'partner_latitude': lat,
       'partner_longitude': lng,
       if (partnerFields.contains('date_localization')) 'date_localization': odooDate(captured),
-      if (hasAddon) 'vv_gps_captured': true,
-      if (hasAddon) 'vv_gps_accuracy': accuracy,
-      if (hasAddon) 'vv_gps_by': _by(a),
     };
     final addr = p['address'];
     if (addr is Map) {
@@ -1370,7 +1363,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   // Call, Meeting, Document, Field Visit...), on contacts or other records.
   // ======================================================================
 
-  /// Field visits need the Odoo module; all other activity types work on any Odoo.
+  /// Works on any Odoo. "Field Visit" is the activity type with the map-pin icon.
   bool get activitiesEnabled => loggedIn;
   bool get fieldVisitsEnabled => visitTypeId != null;
 
@@ -1483,6 +1476,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
             category: r['category'] is String ? r['category'] as String : 'default',
           ),
       ];
+      // "Field Visit": the activity type with the map-pin icon (or that name).
+      final visit =
+          activityTypes.where((t) => t.icon == 'fa-map-marker').firstOrNull ??
+          activityTypes.where((t) => t.name.trim().toLowerCase() == 'field visit').firstOrNull;
+      visitTypeId = visit?.id;
       await _saveSettings();
     } on OdooNetworkException {
       rethrow;
@@ -2109,30 +2107,33 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   // ======================================================================
-  // App updates (needs the VeeVee Field Locator Odoo module)
+  // App updates: a small JSON file at AppConfig.updateInfoUrl (optional)
+  //   {"latest_version": "1.4.1", "apk_url": "https://…/app.apk", "notes": "…"}
   // ======================================================================
 
   Future<UpdateInfo?> checkForUpdate() async {
-    if (!hasAddon || !loggedIn) return null;
+    const url = AppConfig.updateInfoUrl;
+    if (url.isEmpty) return null;
+    final http = HttpClient()..connectionTimeout = const Duration(seconds: 10);
     try {
-      final r = await _call('veevee.field.locator', 'get_app_info', []);
+      final req = await http.getUrl(Uri.parse(url)).timeout(const Duration(seconds: 15));
+      final res = await req.close().timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) return null;
+      final body = await res.transform(utf8.decoder).join().timeout(const Duration(seconds: 15));
+      final r = jsonDecode(body);
       if (r is! Map) return null;
       final info = UpdateInfo(
         latestVersion: (r['latest_version'] ?? '').toString(),
         apkUrl: (r['apk_url'] ?? '').toString(),
-        notes: (r['release_notes'] ?? '').toString(),
+        notes: (r['notes'] ?? r['release_notes'] ?? '').toString(),
       );
       update = info;
-      final typeId = r['field_visit_type_id'];
-      final newType = typeId is int ? typeId : null;
-      if (newType != visitTypeId) {
-        visitTypeId = newType;
-        await _saveSettings();
-      }
       notifyListeners();
       return info;
     } catch (_) {
       return null;
+    } finally {
+      http.close(force: true);
     }
   }
 

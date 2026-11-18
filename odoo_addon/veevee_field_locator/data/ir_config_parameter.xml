@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<odoo noupdate="1">
-    <!-- Raise this when you share a new APK, and set
-         veevee_field_locator.apk_url to its download link. -->
-    <record id="param_latest_version" model="ir.config_parameter">
-        <field name="key">veevee_field_locator.latest_version</field>
-        <field name="value">1.0.0</field>
-    </record>
-</odoo>
