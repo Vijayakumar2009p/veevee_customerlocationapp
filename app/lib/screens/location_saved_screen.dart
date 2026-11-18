@@ -35,7 +35,9 @@ class LocationSavedScreen extends StatelessWidget {
       message = "No connection right now. It will be sent to Odoo automatically when you're online.";
     } else {
       title = 'Saved on this phone';
-      message = 'Sending to Odoo…';
+      message = app.syncing
+          ? 'Signal is weak. It is safe on this phone and will be sent to Odoo automatically.'
+          : 'Sending to Odoo…';
     }
     void goHome() => Navigator.of(context).popUntil((r) => r.isFirst);
     return Scaffold(

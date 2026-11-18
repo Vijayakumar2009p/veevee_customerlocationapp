@@ -662,12 +662,12 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       if (mobile.length == 10) domain.add([phoneField, 'ilike', mobile.substring(5)]);
       if (gst.isNotEmpty) domain.add(['vat', '=ilike', gst]);
       if (domain.isNotEmpty) {
-        final rows = await _call(
+        final rows = await (_call(
           'res.partner',
           'search_read',
           [],
           kwargs: {'domain': domain, 'fields': _readFields, 'limit': 20},
-        ).timeout(AppConfig.saveWaitLimit);
+        )..ignore()).timeout(AppConfig.saveWaitLimit);
         for (final r in (rows as List)) {
           final c = Customer.fromOdoo(Map<String, dynamic>.from(r as Map), phoneField: phoneField);
           if (same(c)) found.putIfAbsent(c.id, () => c);
@@ -840,8 +840,11 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   /// [AppConfig.saveWaitLimit]. With weak signal the sync carries on in the
   /// background (and the timer retries), so the screen never hangs.
   Future<void> _sendSoon() async {
+    // The sync keeps running after the wait ends; ignore() stops a later
+    // failure of it from being reported as an unhandled error.
+    final run = syncNow()..ignore();
     try {
-      await syncNow().timeout(AppConfig.saveWaitLimit);
+      await run.timeout(AppConfig.saveWaitLimit);
     } catch (_) {
       // Timed out or offline: saved on the phone; it will be sent later.
     }
