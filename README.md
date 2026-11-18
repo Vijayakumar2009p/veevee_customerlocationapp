@@ -181,7 +181,7 @@ ORG_GRADLE_PROJECT_allowHttp=true flutter build apk --release --target-platform 
 | Field | Example |
 |---|---|
 | customer | `kalaimagal` (file name only) |
-| server_url | `http://189.72.144.148:8069` (built in; staff only pick the database and log in) |
+| server_url | `http://[SERVER-IP]:8069` (built in; staff only pick the database and log in) |
 | database | empty = choose at login |
 | own_contacts_only | ticked = each login sees only the customers it created |
 | shared_login | ticked = all staff share one login (app asks each person's name) |

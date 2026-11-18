@@ -12,7 +12,7 @@ on:
         description: 'Customer short name, used in the file name (e.g. kalaimagal)'
         required: true
       server_url:
-        description: 'Odoo address, e.g. http://189.72.144.148:8069 or https://erp.example.com'
+        description: 'Odoo address, e.g. http://[SERVER-IP]:8069 or https://erp.example.com'
         required: true
       database:
         description: 'Database name (leave empty to choose it at login)'
