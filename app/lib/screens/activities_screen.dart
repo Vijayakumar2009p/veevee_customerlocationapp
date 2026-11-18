@@ -9,6 +9,7 @@ import '../widgets/common.dart';
 import 'activity_screen.dart';
 import 'home_screen.dart';
 import 'plan_activity_screen.dart';
+import 'set_location_screen.dart';
 
 /// Look of each activity type: icon, colour and the main button.
 class ActivityLook {
@@ -690,6 +691,10 @@ class ActivityCard extends StatelessWidget {
                   ),
                 ],
               ),
+              if (showCustomer && a.kind == ActivityKind.fieldVisit) ...[
+                const SizedBox(height: 10),
+                FieldVisitLocationButton(activity: a, compact: true),
+              ],
               if (withButtons) ...[
                 const SizedBox(height: 12),
                 Row(
@@ -859,6 +864,37 @@ class _CustomerPickerState extends State<_CustomerPicker> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Field visit: "Set location" (or "Update location" when the customer already
+/// has one) opens the Set location screen for the visit's customer.
+/// Hidden when the activity is not linked to a contact.
+class FieldVisitLocationButton extends StatelessWidget {
+  const FieldVisitLocationButton({super.key, required this.activity, this.compact = false});
+  final OdooActivity activity;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final customer = customerOfActivity(AppScope.of(context).customers, activity);
+    if (customer == null) return const SizedBox.shrink();
+    final has = customer.hasLocation;
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          minimumSize: Size(0, compact ? 40 : 50),
+          foregroundColor: VV.blue,
+          side: const BorderSide(color: VV.line),
+          shape: compact ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)) : null,
+        ),
+        onPressed: () =>
+            Navigator.of(context).push(MaterialPageRoute(builder: (_) => SetLocationScreen(customer: customer))),
+        icon: Icon(has ? Icons.edit_location_alt_outlined : Icons.add_location_alt_outlined, size: compact ? 18 : 20),
+        label: Text(has ? 'Update location' : 'Set location', style: TextStyle(fontSize: compact ? 14 : 15)),
       ),
     );
   }

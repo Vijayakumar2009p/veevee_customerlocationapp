@@ -5,7 +5,7 @@ class AppConfig {
   static const String appName = 'VeeVee Field Locator';
 
   /// Must match `version:` in pubspec.yaml (the part before `+`).
-  static const String appVersion = '1.3.0';
+  static const String appVersion = '1.3.1';
 
   /// Pre-filled on login page 1. Customer builds set it with
   /// `--dart-define=DEFAULT_SERVER=http://...`.
@@ -23,6 +23,11 @@ class AppConfig {
 
   /// Network timeout for each Odoo request.
   static const Duration requestTimeout = Duration(seconds: 30);
+
+  /// Saving (location, new customer, activity done or planned): wait at most
+  /// this long for Odoo. With weak or no signal the entry stays saved on the
+  /// phone and is sent in the background.
+  static const Duration saveWaitLimit = Duration(seconds: 5);
 
   /// Retry pending entries this often while the app is open.
   static const Duration autoSyncInterval = Duration(minutes: 1);

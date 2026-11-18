@@ -463,7 +463,9 @@ class ActivityScreen extends StatelessWidget {
                   Row(
                     children: [
                       Expanded(
-                        child: a.kind == ActivityKind.fieldVisit || a.kind == ActivityKind.upload
+                        child: a.kind == ActivityKind.fieldVisit
+                            ? FieldVisitLocationButton(activity: a)
+                            : a.kind == ActivityKind.upload
                             ? const SizedBox.shrink()
                             : OutlinedButton.icon(
                                 style: OutlinedButton.styleFrom(minimumSize: const Size(0, 50)),
@@ -475,7 +477,7 @@ class ActivityScreen extends StatelessWidget {
                                 label: const Text('Mark done', style: TextStyle(fontSize: 15)),
                               ),
                       ),
-                      if (a.kind != ActivityKind.fieldVisit && a.kind != ActivityKind.upload) const SizedBox(width: 12),
+                      if (a.kind != ActivityKind.upload) const SizedBox(width: 12),
                       Expanded(
                         child: OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(

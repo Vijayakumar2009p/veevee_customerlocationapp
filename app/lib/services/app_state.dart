@@ -172,7 +172,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   bool hasAddon = false;
   DateTime? lastRefresh;
   DateTime? lastSyncAt;
-  bool largeText = false;
 
   // Profile (from Odoo res.users)
   int? myPartnerId;
@@ -269,7 +268,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       hasAddon = s['hasAddon'] == true;
       lastRefresh = DateTime.tryParse((s['lastRefresh'] ?? '') as String);
       lastSyncAt = DateTime.tryParse((s['lastSyncAt'] ?? '') as String);
-      largeText = s['largeText'] == true;
       myPartnerId = s['myPartnerId'] as int?;
       companyName = (s['companyName'] ?? '') as String;
       userImage = (s['userImage'] ?? '') as String;
@@ -317,7 +315,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     'hasAddon': hasAddon,
     'lastRefresh': lastRefresh?.toIso8601String(),
     'lastSyncAt': lastSyncAt?.toIso8601String(),
-    'largeText': largeText,
     'myPartnerId': myPartnerId,
     'companyName': companyName,
     'userImage': userImage,
@@ -670,14 +667,14 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
           'search_read',
           [],
           kwargs: {'domain': domain, 'fields': _readFields, 'limit': 20},
-        );
+        ).timeout(AppConfig.saveWaitLimit);
         for (final r in (rows as List)) {
           final c = Customer.fromOdoo(Map<String, dynamic>.from(r as Map), phoneField: phoneField);
           if (same(c)) found.putIfAbsent(c.id, () => c);
         }
       }
     } catch (_) {
-      // Offline: the phone's own list was checked above.
+      // Offline or weak signal: the phone's own list was checked above.
     }
     return found.values.toList();
   }
@@ -788,18 +785,15 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await _saveCustomers();
     await _saveSettings();
     notifyListeners();
-    try {
-      await syncNow();
-    } catch (_) {
-      // Saved on the phone; it will be sent later.
-    }
+    await _sendSoon();
     return resolve(customer);
   }
 
   /// Saves the location on the phone, then tries to send it to Odoo.
   /// Returns the entry's reference: use [pendingByRef] to see whether it
   /// reached Odoo (no entry), still waits, or was refused.
-  Future<String> saveLocation(LocationInput input) async {
+  /// [sendNow] false: only save it; the caller sends it with its next entry.
+  Future<String> saveLocation(LocationInput input, {bool sendNow = true}) async {
     final ref = _newRef();
     String? photo;
     if (input.photoPath != null) photo = await store.keepPhoto(input.photoPath!, ref);
@@ -838,12 +832,19 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await _saveQueue();
     await _saveCustomers();
     notifyListeners();
-    try {
-      await syncNow();
-    } catch (_) {
-      // Saved on the phone; it will be sent later.
-    }
+    if (sendNow) await _sendSoon();
     return ref;
+  }
+
+  /// After saving on the phone: try to send now, but wait at most
+  /// [AppConfig.saveWaitLimit]. With weak signal the sync carries on in the
+  /// background (and the timer retries), so the screen never hangs.
+  Future<void> _sendSoon() async {
+    try {
+      await syncNow().timeout(AppConfig.saveWaitLimit);
+    } catch (_) {
+      // Timed out or offline: saved on the phone; it will be sent later.
+    }
   }
 
   PendingAction? pendingByRef(String ref) {
@@ -1219,11 +1220,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await _saveQueue();
     await _saveCustomers();
     notifyListeners();
-    try {
-      await syncNow();
-    } catch (_) {
-      // Saved on the phone; it will be sent later.
-    }
+    await _sendSoon();
     return ref;
   }
 
@@ -1638,11 +1635,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await _saveQueue();
     await _saveActivities();
     notifyListeners();
-    try {
-      await syncNow();
-    } catch (_) {
-      // Saved on the phone; it will be sent later.
-    }
+    await _sendSoon();
     return ref;
   }
 
@@ -1693,11 +1686,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await _saveQueue();
     await _saveActivities();
     notifyListeners();
-    try {
-      await syncNow();
-    } catch (_) {
-      // Saved on the phone; it will be sent later.
-    }
+    await _sendSoon();
     return ref;
   }
 
@@ -1750,11 +1739,7 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
     await _saveQueue();
     await _saveActivities();
     notifyListeners();
-    try {
-      await syncNow();
-    } catch (_) {
-      // Saved on the phone; it will be sent later.
-    }
+    await _sendSoon();
     return ref;
   }
 
@@ -1935,14 +1920,8 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   // ======================================================================
-  // Profile tab: who I am, my work this month, history, phone check
+  // Profile tab: who I am, my work this month, history
   // ======================================================================
-
-  Future<void> setLargeText(bool value) async {
-    largeText = value;
-    await _saveSettings();
-    notifyListeners();
-  }
 
   /// Name, photo and company of the logged-in Odoo user.
   Future<void> loadProfile() async {
@@ -2124,57 +2103,6 @@ class AppState extends ChangeNotifier with WidgetsBindingObserver {
       );
     }
     return out;
-  }
-
-  /// True when Odoo answers with this login.
-  Future<bool> checkServer() async {
-    try {
-      await _call('res.users', 'search_count', [
-        [
-          ['id', '=', uid],
-        ],
-      ]);
-      return true;
-    } on OdooNetworkException {
-      return false;
-    } on OdooException {
-      return false;
-    }
-  }
-
-  /// "Report a problem": a note with the text (and screenshot) on your own
-  /// contact in Odoo, plus a To-Do for the administrator so it is seen.
-  Future<void> reportProblem(String text, {String? screenshotPath}) async {
-    if (myPartnerId == null) await loadProfile();
-    final pid = myPartnerId;
-    if (pid == null) throw OdooException('Could not find your contact in Odoo. Check the internet and try again.');
-    final attachments = <int>[];
-    if (screenshotPath != null) {
-      attachments.add(await _uploadPhoto(screenshotPath, 'Problem screenshot ${formatDate(DateTime.now())}.jpg'));
-    }
-    final body =
-        'Problem reported from VeeVee Field Locator ${AppConfig.appVersion} by $userName '
-        'on ${formatDateTime(DateTime.now())}: ${text.trim()}';
-    await _postNote(pid, body, attachmentIds: attachments);
-    // Tell the administrator (user 2 is the first admin in every Odoo).
-    final todo = activityTypes.where((t) => t.icon == 'fa-check' || t.name == 'To-Do').firstOrNull;
-    try {
-      await _call(
-        'res.partner',
-        'activity_schedule',
-        [
-          [pid],
-        ],
-        kwargs: {
-          'activity_type_id': ?todo?.id,
-          'user_id': 2,
-          'summary': 'Problem reported in the app by $userName',
-          'note': text.trim(),
-        },
-      );
-    } on OdooException {
-      // The note is posted; the reminder for the admin is a bonus.
-    }
   }
 
   // ======================================================================

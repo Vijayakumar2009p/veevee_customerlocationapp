@@ -1,14 +1,11 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:geolocator/geolocator.dart';
 
 import '../app_scope.dart';
 import '../config.dart';
 import '../models/customer.dart';
 import '../services/app_state.dart';
-import '../services/location_service.dart';
 import '../theme.dart';
 import '../utils/format.dart';
 import '../widgets/common.dart';
@@ -17,9 +14,7 @@ import 'customer_screen.dart';
 import 'home_screen.dart';
 import 'settings_screen.dart';
 
-const _battery = MethodChannel('veevee/battery');
-
-/// Profile tab: who I am, my work, history, sync, phone check, display, help.
+/// Profile tab: who I am, my work, history, sync, app version, log out.
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key, this.onOpenTab});
   final void Function(int tab)? onOpenTab;
@@ -28,30 +23,16 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserver {
+class _ProfileScreenState extends State<ProfileScreen> {
   Future<(WorkStats, WorkStats)>? _stats;
   Future<int>? _myCount;
   Future<List<HistoryItem>>? _history;
-  Future<List<_Check>>? _checks;
   bool _photoBusy = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     Future.microtask(_reload);
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Back from Android settings after "Fix this": check again.
-    if (state == AppLifecycleState.resumed && mounted) setState(() => _checks = _runChecks());
   }
 
   void _reload() {
@@ -61,62 +42,7 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
       _stats = app.loadWorkStats();
       _myCount = app.loadMyCustomersCount();
       _history = app.loadHistory(limit: 8);
-      _checks = _runChecks();
     });
-  }
-
-  Future<List<_Check>> _runChecks() async {
-    final app = AppScope.read(context);
-    final out = <_Check>[];
-    final permission = await Geolocator.checkPermission();
-    final allowed = permission == LocationPermission.always || permission == LocationPermission.whileInUse;
-    out.add(
-      _Check(
-        'Location permission',
-        allowed,
-        allowed
-            ? null
-            : () async {
-                final p = await Geolocator.requestPermission();
-                if (p == LocationPermission.deniedForever) await LocationService.openAppSettings();
-              },
-      ),
-    );
-    var precise = false;
-    if (allowed) {
-      try {
-        precise = await Geolocator.getLocationAccuracy() == LocationAccuracyStatus.precise;
-      } catch (_) {
-        precise = true; // not reported on this phone
-      }
-    }
-    out.add(_Check('Precise GPS', precise, precise ? null : LocationService.openAppSettings));
-    final gpsOn = await Geolocator.isLocationServiceEnabled();
-    out.add(_Check('Location (GPS) turned on', gpsOn, gpsOn ? null : LocationService.openLocationSettings));
-    var battery = true;
-    try {
-      battery = await _battery.invokeMethod<bool>('isIgnoringOptimizations') ?? true;
-    } catch (_) {
-      battery = true;
-    }
-    out.add(
-      _Check(
-        'Battery saver not limiting the app',
-        battery,
-        battery ? null : () => _battery.invokeMethod<bool>('openSettings'),
-        hint: battery ? null : 'Allow "No restrictions" so sync works in the background.',
-      ),
-    );
-    final server = await app.checkServer();
-    out.add(
-      _Check(
-        'Internet & Odoo server',
-        server,
-        null,
-        hint: server ? null : 'Check mobile data or Wi-Fi. Entries wait safely on the phone.',
-      ),
-    );
-    return out;
   }
 
   Future<void> _changePhoto() async {
@@ -162,10 +88,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
                     _historyCard(),
                     const SizedBox(height: 14),
                     _syncCard(app),
-                    const SizedBox(height: 14),
-                    _checksCard(),
-                    const SizedBox(height: 14),
-                    _displayCard(app),
                     const SizedBox(height: 14),
                     _moreCard(app),
                     const SizedBox(height: 8),
@@ -510,101 +432,11 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
     return d.year == n.year && d.month == n.month && d.day == n.day;
   }
 
-  // ---------------------------------------------------------- phone check
-  Widget _checksCard() => _Card(
-    title: 'Phone check',
-    trailing: TextButton(onPressed: () => setState(() => _checks = _runChecks()), child: const Text('Check again')),
-    child: FutureBuilder<List<_Check>>(
-      future: _checks,
-      builder: (context, snap) {
-        if (!snap.hasData) {
-          return const Padding(
-            padding: EdgeInsets.all(16),
-            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-          );
-        }
-        final checks = snap.data!;
-        return Column(
-          children: [
-            for (var i = 0; i < checks.length; i++)
-              Container(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: i == checks.length - 1
-                    ? null
-                    : const BoxDecoration(
-                        border: Border(bottom: BorderSide(color: WaColors.divider)),
-                      ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 24,
-                      height: 24,
-                      decoration: BoxDecoration(color: checks[i].ok ? VV.success : VV.danger, shape: BoxShape.circle),
-                      child: Icon(checks[i].ok ? Icons.check : Icons.priority_high, size: 15, color: Colors.white),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(checks[i].label, style: const TextStyle(fontSize: 15)),
-                          if (checks[i].hint != null)
-                            Text(checks[i].hint!, style: const TextStyle(fontSize: 12, color: WaColors.grey)),
-                        ],
-                      ),
-                    ),
-                    if (checks[i].ok)
-                      const Text(
-                        'OK',
-                        style: TextStyle(fontSize: 13, color: VV.success, fontWeight: FontWeight.w700),
-                      )
-                    else if (checks[i].fix != null)
-                      FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: VV.dangerSoft,
-                          foregroundColor: VV.danger,
-                          minimumSize: const Size(0, 36),
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                        ),
-                        onPressed: () async {
-                          await checks[i].fix!();
-                          if (mounted) setState(() => _checks = _runChecks());
-                        },
-                        child: const Text('Fix this', style: TextStyle(fontWeight: FontWeight.w700)),
-                      ),
-                  ],
-                ),
-              ),
-          ],
-        );
-      },
-    ),
-  );
-
-  // -------------------------------------------------------------- display
-  Widget _displayCard(AppState app) => _Card(
-    title: 'Display',
-    child: SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      value: app.largeText,
-      onChanged: app.setLargeText,
-      title: const Text('Large text', style: TextStyle(fontWeight: FontWeight.w500)),
-      subtitle: const Text('Bigger letters everywhere in the app'),
-    ),
-  );
-
   // ----------------------------------------------------------------- more
   Widget _moreCard(AppState app) => _Card(
     padding: EdgeInsets.zero,
     child: Column(
       children: [
-        ListTile(
-          leading: const Icon(Icons.report_problem_outlined, color: VV.goldText),
-          title: const Text('Report a problem', style: TextStyle(fontWeight: FontWeight.w500)),
-          trailing: const Icon(Icons.chevron_right, color: WaColors.grey),
-          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReportProblemScreen())),
-        ),
-        const Divider(height: 1, color: WaColors.divider),
         ListTile(
           leading: const Icon(Icons.info_outline, color: VV.blue),
           title: Text('App version ${AppConfig.appVersion}', style: const TextStyle(fontWeight: FontWeight.w500)),
@@ -640,14 +472,6 @@ class _ProfileScreenState extends State<ProfileScreen> with WidgetsBindingObserv
       TextButton(onPressed: onRetry, child: const Text('Try again')),
     ],
   );
-}
-
-class _Check {
-  _Check(this.label, this.ok, this.fix, {this.hint});
-  final String label;
-  final bool ok;
-  final Future<void> Function()? fix;
-  final String? hint;
 }
 
 class _Card extends StatelessWidget {
@@ -862,98 +686,4 @@ class MyCustomersScreen extends StatelessWidget {
             ),
     );
   }
-}
-
-/// Profile → Report a problem: text + optional screenshot, sent to Odoo.
-class ReportProblemScreen extends StatefulWidget {
-  const ReportProblemScreen({super.key});
-
-  @override
-  State<ReportProblemScreen> createState() => _ReportProblemScreenState();
-}
-
-class _ReportProblemScreenState extends State<ReportProblemScreen> {
-  final _text = TextEditingController();
-  final _photos = PhotoSelection();
-  bool _busy = false;
-
-  @override
-  void dispose() {
-    _text.dispose();
-    super.dispose();
-  }
-
-  Future<void> _send() async {
-    if (_text.text.trim().length < 5) {
-      showMessage(context, 'Please write what went wrong.', error: true);
-      return;
-    }
-    setState(() => _busy = true);
-    try {
-      await AppScope.read(
-        context,
-      ).reportProblem(_text.text, screenshotPath: _photos.isEmpty ? null : _photos.paths.first);
-      if (!mounted) return;
-      showMessage(context, 'Thank you. Your report was sent to the Odoo administrator.');
-      Navigator.of(context).pop();
-    } catch (e) {
-      if (mounted) {
-        showMessage(context, 'Could not send. Check the internet and try again.', error: true);
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Report a problem')),
-    body: SafeArea(
-      child: Column(
-        children: [
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                const Text(
-                  'Tell us what happened. It is sent to your Odoo administrator with your name and app version.',
-                  style: TextStyle(color: WaColors.grey),
-                ),
-                const SizedBox(height: 16),
-                const FieldLabel('What went wrong?', required: true),
-                TextField(
-                  controller: _text,
-                  minLines: 4,
-                  maxLines: 8,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: const InputDecoration(hintText: 'e.g. Location does not save for Anand Knits'),
-                ),
-                const SizedBox(height: 16),
-                const FieldLabel('Screenshot', optional: true),
-                PhotoStrip(selection: _photos, enabled: !_busy, chooseProfile: false, onChanged: () => setState(() {})),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                style: FilledButton.styleFrom(minimumSize: const Size(0, 52)),
-                onPressed: _busy ? null : _send,
-                icon: _busy
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
-                      )
-                    : const Icon(Icons.send),
-                label: const Text('Send report', style: TextStyle(fontSize: 16)),
-              ),
-            ),
-          ),
-        ],
-      ),
-    ),
-  );
 }

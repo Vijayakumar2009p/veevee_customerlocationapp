@@ -65,15 +65,6 @@ class _FieldLocatorAppState extends State<FieldLocatorApp> {
         title: AppConfig.appName,
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
-        // Profile → Display → Large text.
-        builder: (context, child) {
-          if (!state.largeText) return child!;
-          final mq = MediaQuery.of(context);
-          return MediaQuery(
-            data: mq.copyWith(textScaler: TextScaler.linear(mq.textScaler.scale(1) * 1.18)),
-            child: child!,
-          );
-        },
         home: const RootGate(),
       ),
     );

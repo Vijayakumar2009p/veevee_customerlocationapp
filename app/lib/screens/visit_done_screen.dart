@@ -174,6 +174,7 @@ class _VisitDoneScreenState extends State<VisitDoneScreen> {
             capturedAt: DateTime.now(),
             remark: 'Saved while marking a field visit done',
           ),
+          sendNow: false, // sent together with the visit below (one wait)
         );
       }
       final ref = await app.markActivityDone(
